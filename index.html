@@ -108,6 +108,7 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
         <option value="high">高画質</option>
       </select>
       <span id="recTime" class="hide">00:00</span>
+      <button id="rewindBtn" class="hide"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-4"/></svg>戻る</button>
       <button id="pauseBtn" class="hide" ><svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>一時停止</button>
       <button id="recBtn"><span class="dot"></span><span id="recLabel">録画</span></button>
       <button id="fsBtn" aria-label="全画面"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
@@ -119,7 +120,7 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
     <button class="tool" data-tool="hl" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M6 20h12"/><path d="M8 16l2-2 7-7-3-3-7 7-1 3z"/></svg>マーカー</button>
     <button class="tool" data-tool="eraser" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M4 15l9-9 6 6-8 8H8z"/></svg>消しゴム</button>
     <button class="tool" data-tool="laser" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>レーザー</button>
-    <button class="tool" data-tool="move" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></svg>画像移動</button>
+    <button class="tool" data-tool="move" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M5 5h3M11 5h3M17 5h2v2M19 10v3M19 16v3h-2M14 19h-3M8 19H5v-2M5 14v-3M5 8V5" /></svg>選択</button>
     <div id="inkGroup" style="display:contents">
     <hr>
     <button class="cap" data-color="#1a1a1a" aria-label="黒" aria-pressed="true" style="--c:#1a1a1a"><span></span></button>
@@ -132,7 +133,12 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
     <button class="size" data-size="8" aria-label="太" aria-pressed="false"><i style="width:13px;height:13px"></i><b>太</b></button>
     </div>
     <hr>
-    <button id="delImgBtn" class="tool hide"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>画像削除</button>
+    <div id="selGroup" style="display:none;flex-direction:column;gap:6px">
+      <button class="tool" id="copyBtn"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/></svg>コピー</button>
+      <button class="tool" id="cutBtn"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8 16L19 4M16 16L5 4"/></svg>切り取り</button>
+      <button class="tool" id="pasteBtn"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 11h6M9 15h4"/></svg>貼り付け</button>
+      <button class="tool" id="delSelBtn"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>削除</button>
+    </div>
   </aside>
 
   <main id="stage">
@@ -142,6 +148,15 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
 </div>
 
 <div id="toast" role="status"></div>
+
+<dialog id="recoverDlg">
+  <h2>録画の復元</h2>
+  <p id="recoverText" style="color:var(--ink)"></p>
+  <div class="row">
+    <button id="recoverDiscard">破棄する</button>
+    <button id="recoverOk" class="primary">動画にする</button>
+  </div>
+</dialog>
 
 <dialog id="resultDlg">
   <h2>録画した動画</h2>
@@ -171,7 +186,7 @@ let tool = 'pen', penColor = '#1a1a1a', hlColor = '#ffd400', size = 4.5;
 let penSeen = false;
 let drawing = null, activeId = null;
 let erasing = null;
-let sel = null, drag = null;
+let sel = [], drag = null, lasso = null, clip = null, clipPage = -1, pasteN = 0;
 let laser = [];
 let needsRender = true, layerDirty = true;
 function newPage(){ return { items: [], undo: [], redo: [] }; }
@@ -273,24 +288,39 @@ function drawStroke(c, s){
   }
   c.restore();
 }
+function drawItem(c, it){
+  if (it.type === 'image'){ const im = getImg(it.src); if (im.complete && im.naturalWidth) c.drawImage(im, it.x, it.y, it.w, it.h); }
+  else drawStroke(c, it);
+}
 function renderLayer(){
   lctx.globalCompositeOperation = 'source-over'; lctx.globalAlpha = 1;
   lctx.fillStyle = BOARD_BG(); lctx.fillRect(0, 0, W, H);
   if (grid) drawGrid(lctx);
-  for (const it of page().items){
-    if (it.type === 'image'){ const im = getImg(it.src); if (im.complete && im.naturalWidth) lctx.drawImage(im, it.x, it.y, it.w, it.h); }
-    else drawStroke(lctx, it);
-  }
+  const hidden = drag ? new Set(sel) : null;
+  for (const it of page().items){ if (!hidden || !hidden.has(it)) drawItem(lctx, it); }
   layerDirty = false;
 }
 function render(){
   if (layerDirty) renderLayer();
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0); applyT(ctx);
   if (drawing) drawStroke(ctx, drawing);
-  if (sel && tool === 'move'){
-    ctx.save(); ctx.strokeStyle = '#1f5fbf'; ctx.lineWidth = 3; ctx.setLineDash([12, 8]);
-    ctx.strokeRect(sel.x, sel.y, sel.w, sel.h); ctx.setLineDash([]);
-    ctx.fillStyle = '#1f5fbf'; ctx.fillRect(sel.x + sel.w - 18, sel.y + sel.h - 18, 36, 36); ctx.restore();
+  if (tool === 'move'){
+    const accent = dark ? '#7db3ff' : '#1f5fbf';
+    if (drag){
+      ctx.save(); ctx.translate(drag.a.x + drag.dx, drag.a.y + drag.dy); ctx.scale(drag.s, drag.s); ctx.translate(-drag.a.x, -drag.a.y);
+      for (const it of sel) drawItem(ctx, it);
+      ctx.restore();
+    }
+    if (sel.length){
+      const b = selBox();
+      ctx.save(); ctx.strokeStyle = accent; ctx.lineWidth = 2.5; ctx.setLineDash([12, 8]);
+      ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.setLineDash([]);
+      ctx.fillStyle = accent; ctx.fillRect(b.x + b.w - 16, b.y + b.h - 16, 32, 32); ctx.restore();
+    }
+    if (lasso && lasso.length > 1){
+      ctx.save(); ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
+      ctx.beginPath(); ctx.moveTo(lasso[0].x, lasso[0].y); for (const q of lasso) ctx.lineTo(q.x, q.y); ctx.closePath(); ctx.stroke(); ctx.restore();
+    }
   }
   if (erasing && erasing.pt){
     ctx.save(); ctx.strokeStyle = dark ? 'rgba(255,255,255,.6)' : 'rgba(30,43,55,.55)'; ctx.lineWidth = 2;
@@ -330,8 +360,8 @@ function loop(){
 /* ---------- undo ---------- */
 function snapshot(){ const pg = page(); pg.undo.push(pg.items.slice()); if (pg.undo.length > 100) pg.undo.shift(); pg.redo = []; }
 function changed(){ layerDirty = needsRender = true; updateUI(); scheduleSave(); }
-function undo(){ const pg = page(); if (!pg.undo.length) return; pg.redo.push(pg.items); pg.items = pg.undo.pop(); sel = null; changed(); }
-function redo(){ const pg = page(); if (!pg.redo.length) return; pg.undo.push(pg.items); pg.items = pg.redo.pop(); sel = null; changed(); }
+function undo(){ const pg = page(); if (!pg.undo.length) return; pg.redo.push(pg.items); pg.items = pg.undo.pop(); sel = []; changed(); }
+function redo(){ const pg = page(); if (!pg.redo.length) return; pg.undo.push(pg.items); pg.items = pg.redo.pop(); sel = []; changed(); }
 
 /* ---------- pointer ---------- */
 const ERASE_R = 22;
@@ -356,13 +386,52 @@ function eraseAt(pt){
   });
   if (hit){ erasing.hit = true; layerDirty = true; }
 }
-function imageAt(pt){
+function bbox(items){
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const it of items){
+    if (it.type === 'image'){ x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); x1 = Math.max(x1, it.x + it.w); y1 = Math.max(y1, it.y + it.h); }
+    else { const r = it.size; for (const p of it.pts){ x0 = Math.min(x0, p.x - r); y0 = Math.min(y0, p.y - r); x1 = Math.max(x1, p.x + r); y1 = Math.max(y1, p.y + r); } }
+  }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+function selBox(){
+  const b = bbox(sel), pad = 10;
+  let x = b.x - pad, y = b.y - pad, w = b.w + pad * 2, h = b.h + pad * 2;
+  if (drag){ x = drag.a.x + (x - drag.a.x) * drag.s + drag.dx; y = drag.a.y + (y - drag.a.y) * drag.s + drag.dy; w *= drag.s; h *= drag.s; }
+  return { x, y, w, h };
+}
+function pip(pt, poly){
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+    const a = poly[i], b = poly[j];
+    if ((a.y > pt.y) !== (b.y > pt.y) && pt.x < (b.x - a.x) * (pt.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+function lassoSelect(poly){
+  return page().items.filter(it => {
+    if (it.locked) return false;
+    if (it.type === 'image') return pip({ x: it.x + it.w / 2, y: it.y + it.h / 2 }, poly);
+    let k = 0; for (const p of it.pts) if (pip(p, poly)) k++;
+    return k >= it.pts.length * 0.5;
+  });
+}
+function hitAt(pt){
   const items = page().items;
   for (let i = items.length - 1; i >= 0; i--){
-    const it = items[i];
-    if (it.type === 'image' && !it.locked && pt.x >= it.x && pt.x <= it.x + it.w && pt.y >= it.y && pt.y <= it.y + it.h) return i;
+    const it = items[i]; if (it.locked) continue;
+    if (it.type === 'image'){ if (pt.x >= it.x && pt.x <= it.x + it.w && pt.y >= it.y && pt.y <= it.y + it.h) return it; }
+    else {
+      const r = Math.max(14, it.size), p = it.pts;
+      if (p.length === 1 ? Math.hypot(p[0].x - pt.x, p[0].y - pt.y) < r : p.some((q, k) => k && segDist(pt.x, pt.y, p[k-1], q) < r)) return it;
+    }
   }
-  return -1;
+  return null;
+}
+function tfItem(it, a, dx, dy, s){
+  const X = v => a.x + (v - a.x) * s + dx, Y = v => a.y + (v - a.y) * s + dy;
+  if (it.type === 'image') return { ...it, x: X(it.x), y: Y(it.y), w: it.w * s, h: it.h * s, locked: false };
+  return { ...it, size: it.size * s, pts: it.pts.map(p => ({ x: X(p.x), y: Y(p.y), p: p.p })) };
 }
 
 cv.addEventListener('pointerdown', e => {
@@ -379,17 +448,21 @@ cv.addEventListener('pointerdown', e => {
   } else if (tool === 'laser'){
     laserDown = true; laser.push({ x: pt.x, y: pt.y, t: performance.now() });
   } else if (tool === 'move'){
-    if (sel && Math.abs(pt.x - (sel.x + sel.w)) < 40 && Math.abs(pt.y - (sel.y + sel.h)) < 40){
-      snapshot(); swapSel(); drag = { mode: 'resize', sx: pt.x, sy: pt.y, w: sel.w, h: sel.h, moved: false };
-    } else {
-      const i = imageAt(pt);
-      if (i < 0){ sel = null; updateUI(); }
-      else { snapshot(); sel = page().items[i]; swapSel(); drag = { mode: 'move', sx: pt.x, sy: pt.y, x: sel.x, y: sel.y, moved: false }; updateUI(); }
+    if (sel.length){
+      const b = selBox();
+      const a = { x: b.x, y: b.y };
+      if (Math.abs(pt.x - (b.x + b.w)) < 44 && Math.abs(pt.y - (b.y + b.h)) < 44){
+        drag = { mode: 'scale', a, sx: pt.x, sy: pt.y, bw: b.w, bh: b.h, dx: 0, dy: 0, s: 1, moved: false };
+      } else if (pt.x >= b.x && pt.x <= b.x + b.w && pt.y >= b.y && pt.y <= b.y + b.h){
+        drag = { mode: 'move', a, sx: pt.x, sy: pt.y, dx: 0, dy: 0, s: 1, moved: false };
+      }
+      if (drag) layerDirty = true;
     }
+    if (!drag) lasso = [pt];
   }
   needsRender = true;
 });
-function swapSel(){ const items = page().items, i = items.indexOf(sel); const c = { ...sel }; items[i] = c; sel = c; }
+
 
 cv.addEventListener('pointermove', e => {
   if (e.pointerId !== activeId) return;
@@ -397,12 +470,13 @@ cv.addEventListener('pointermove', e => {
   if (drawing){ for (const ev of (evs.length ? evs : [e])){ const pt = toBoard(ev); const L = drawing.pts[drawing.pts.length-1]; if (Math.hypot(pt.x - L.x, pt.y - L.y) > 0.6){ pt.p = L.p * 0.65 + pt.p * 0.35; drawing.pts.push(pt); } } }
   else if (erasing){ for (const ev of (evs.length ? evs : [e])) { erasing.pt = toBoard(ev); eraseAt(erasing.pt); } }
   else if (tool === 'laser'){ for (const ev of (evs.length ? evs : [e])){ const pt = toBoard(ev); laser.push({ x: pt.x, y: pt.y, t: performance.now() }); } }
-  else if (drag && sel){
-    const pt = toBoard(e); drag.moved = true;
-    if (drag.mode === 'move'){ sel.x = drag.x + pt.x - drag.sx; sel.y = drag.y + pt.y - drag.sy; }
-    else { const r = drag.h / drag.w; const w = Math.max(60, drag.w + pt.x - drag.sx); sel.w = w; sel.h = w * r; }
-    layerDirty = true;
+  else if (drag){
+    const pt = toBoard(e);
+    if (drag.mode === 'move'){ drag.dx = pt.x - drag.sx; drag.dy = pt.y - drag.sy; }
+    else { drag.s = Math.max(0.1, (pt.x - drag.a.x + pt.y - drag.a.y) / (drag.bw + drag.bh)); }
+    if (Math.abs(drag.dx) + Math.abs(drag.dy) > 2 || Math.abs(drag.s - 1) > 0.01) drag.moved = true;
   }
+  else if (lasso){ const pt = toBoard(e); const L = lasso[lasso.length-1]; if (Math.hypot(pt.x - L.x, pt.y - L.y) > 3) lasso.push(pt); }
   needsRender = true;
 });
 function endPointer(e){
@@ -410,7 +484,21 @@ function endPointer(e){
   activeId = null;
   if (drawing){ snapshot(); page().items.push(drawing); drawing = null; changed(); }
   else if (erasing){ if (!erasing.hit) page().undo.pop(); else changed(); erasing = null; }
-  else if (drag){ if (!drag.moved){ page().undo.pop(); } else changed(); drag = null; }
+  else if (drag){
+    const d = drag; drag = null;
+    if (d.moved){
+      snapshot();
+      const set = new Set(sel), out = [];
+      page().items = page().items.map(it => { if (!set.has(it)) return it; const t = tfItem(it, d.a, d.dx, d.dy, d.s); out.push(t); return t; });
+      sel = out; changed();
+    } else layerDirty = true;
+  }
+  else if (lasso){
+    let len = 0; for (let i = 1; i < lasso.length; i++) len += Math.hypot(lasso[i].x - lasso[i-1].x, lasso[i].y - lasso[i-1].y);
+    if (len < 15){ const it = hitAt(lasso[0]); sel = it ? [it] : []; }
+    else sel = lassoSelect(lasso);
+    lasso = null; updateUI();
+  }
   laserDown = false; needsRender = true;
 }
 cv.addEventListener('pointerup', endPointer);
@@ -419,7 +507,7 @@ stage.addEventListener('touchmove', e => e.preventDefault(), { passive: false })
 
 /* ---------- toolbar ---------- */
 document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => {
-  tool = b.dataset.tool; if (tool !== 'move') sel = null;
+  tool = b.dataset.tool; if (tool !== 'move'){ sel = []; lasso = null; }
   document.querySelectorAll('[data-tool]').forEach(x => x.setAttribute('aria-pressed', x === b));
   syncColors(); updateUI(); needsRender = true;
 });
@@ -462,8 +550,23 @@ $('fsBtn').onclick = async () => {
   } catch (e){ toast('この画面では全画面にできません。Safariで「ホーム画面に追加」して開くと全画面で使えます', 5000); }
 };
 $('gridBtn').onclick = () => { grid = !grid; $('gridBtn').setAttribute('aria-pressed', grid); changed(); };
-$('delImgBtn').onclick = () => { if (!sel) return; snapshot(); const pg = page(); pg.items = pg.items.filter(i => i !== sel); sel = null; changed(); };
-function goTo(i){ cur = Math.max(0, Math.min(pages.length - 1, i)); sel = null; changed(); }
+function copySel(){ if (!sel.length) return false; clip = sel.slice(); clipPage = cur; pasteN = 0; return true; }
+function deleteSel(){ if (!sel.length) return; snapshot(); const set = new Set(sel); page().items = page().items.filter(i => !set.has(i)); sel = []; changed(); }
+function pasteClip(){
+  if (!clip) return;
+  pasteN++;
+  const off = clipPage === cur ? 40 * pasteN : 40 * (pasteN - 1);
+  snapshot();
+  const copies = clip.map(it => tfItem(it, { x: 0, y: 0 }, off, off, 1));
+  page().items.push(...copies);
+  if (tool !== 'move') document.querySelector('[data-tool="move"]').click();
+  sel = copies; changed();
+}
+$('copyBtn').onclick = () => { if (copySel()) { toast('コピーしました。別のページにも貼り付けられます'); updateUI(); } };
+$('cutBtn').onclick = () => { if (copySel()){ clipPage = -1; deleteSel(); toast('切り取りました'); } };
+$('pasteBtn').onclick = pasteClip;
+$('delSelBtn').onclick = deleteSel;
+function goTo(i){ cur = Math.max(0, Math.min(pages.length - 1, i)); sel = []; changed(); }
 $('prevBtn').onclick = () => goTo(cur - 1);
 $('nextBtn').onclick = () => goTo(cur + 1);
 $('addBtn').onclick = () => { pages.splice(cur + 1, 0, newPage()); goTo(cur + 1); };
@@ -481,6 +584,10 @@ function deletePage(){
 }
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c'){ copySel(); updateUI(); }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'x'){ if (copySel()){ clipPage = -1; deleteSel(); } }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v'){ e.preventDefault(); pasteClip(); }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && sel.length){ e.preventDefault(); deleteSel(); }
   if (e.key === 'ArrowRight') goTo(cur + 1);
   if (e.key === 'ArrowLeft') goTo(cur - 1);
 });
@@ -488,7 +595,9 @@ function updateUI(){
   $('pageLabel').textContent = `${cur + 1} / ${pages.length}`;
   $('prevBtn').disabled = cur === 0; $('nextBtn').disabled = cur === pages.length - 1;
   $('undoBtn').disabled = !page().undo.length; $('redoBtn').disabled = !page().redo.length;
-  $('delImgBtn').classList.toggle('hide', !(sel && tool === 'move'));
+  $('selGroup').style.display = tool === 'move' ? 'flex' : 'none';
+  $('copyBtn').disabled = $('cutBtn').disabled = $('delSelBtn').disabled = !sel.length;
+  $('pasteBtn').disabled = !clip;
 }
 let toastT;
 function toast(msg, ms = 2600){ const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
@@ -517,7 +626,7 @@ async function importImage(f){
   snapshot();
   const item = { type: 'image', src, x: (W - r.w) / 2, y: (H - r.h) / 2, w: r.w, h: r.h, locked: false };
   page().items.push(item);
-  document.querySelector('[data-tool="move"]').click(); sel = item; changed();
+  document.querySelector('[data-tool="move"]').click(); sel = [item]; changed();
   toast('画像を貼りました。ドラッグで移動、右下の四角で拡大縮小できます');
 }
 async function importPdf(f){
@@ -545,10 +654,143 @@ async function importPdf(f){
   toast(`PDF ${pdf.numPages}ページを追加しました`);
 }
 
+/* ---------- 場面（断片化MP4）をつなげて1本にする ---------- */
+const MP4 = (() => {
+  const s4 = (dv, o) => String.fromCharCode(dv.getUint8(o), dv.getUint8(o+1), dv.getUint8(o+2), dv.getUint8(o+3));
+  async function topBoxes(blob){
+    const out = []; let off = 0;
+    while (off + 8 <= blob.size){
+      const dv = new DataView(await blob.slice(off, Math.min(blob.size, off + 16)).arrayBuffer());
+      let size = dv.getUint32(0), hdr = 8; const type = s4(dv, 4);
+      if (size === 1){ if (dv.byteLength < 16) break; size = Number(dv.getBigUint64(8)); hdr = 16; }
+      else if (size === 0) size = blob.size - off;
+      if (size < hdr || off + size > blob.size) break;           // 途中で切れた箱は捨てる
+      out.push({ type, off, size, hdr }); off += size;
+    }
+    return out;
+  }
+  function kids(dv, start, end){
+    const out = []; let o = start;
+    while (o + 8 <= end){
+      let size = dv.getUint32(o), hdr = 8; const type = s4(dv, o + 4);
+      if (size === 1){ size = Number(dv.getBigUint64(o + 8)); hdr = 16; } else if (size === 0) size = end - o;
+      if (size < hdr || o + size > end) break;
+      out.push({ type, off: o, size, hdr, end: o + size }); o += size;
+    }
+    return out;
+  }
+  const find = (dv, box, type) => kids(dv, box.off + box.hdr, box.end).filter(b => b.type === type);
+  function parseMoov(bytes){
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const moov = { type: 'moov', off: 0, hdr: 8, end: bytes.byteLength };
+    const tracks = {}; let movieTs = 1000, mehd = null;
+    for (const b of kids(dv, 8, bytes.byteLength)){
+      if (b.type === 'mvhd'){ const v = dv.getUint8(b.off + 8); movieTs = dv.getUint32(b.off + (v ? 28 : 20)); }
+      if (b.type === 'trak'){
+        const tkhd = find(dv, b, 'tkhd')[0], mdia = find(dv, b, 'mdia')[0];
+        const tv = dv.getUint8(tkhd.off + 8); const id = dv.getUint32(tkhd.off + (tv ? 28 : 20));
+        const mdhd = find(dv, mdia, 'mdhd')[0]; const mv = dv.getUint8(mdhd.off + 8);
+        tracks[id] = { ts: dv.getUint32(mdhd.off + (mv ? 28 : 20)), defDur: 0 };
+      }
+    }
+    for (const mvex of find(dv, moov, 'mvex')){
+      for (const t of find(dv, mvex, 'trex')){ const id = dv.getUint32(t.off + 12); if (tracks[id]) tracks[id].defDur = dv.getUint32(t.off + 20); }
+      const m = find(dv, mvex, 'mehd')[0]; if (m) mehd = { off: m.off, v: dv.getUint8(m.off + 8) };
+    }
+    return { tracks, movieTs, mehd };
+  }
+  function parseMoof(bytes, init){
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const root = { off: 0, hdr: 8, end: bytes.byteLength };
+    const trafs = [];
+    for (const traf of find(dv, root, 'traf')){
+      const tfhd = find(dv, traf, 'tfhd')[0]; if (!tfhd) continue;
+      const fl = dv.getUint32(tfhd.off + 8) & 0xffffff, id = dv.getUint32(tfhd.off + 12);
+      let p = tfhd.off + 16, bdo = null, defDur = init.tracks[id] ? init.tracks[id].defDur : 0;
+      if (fl & 0x01){ bdo = p; p += 8; } if (fl & 0x02) p += 4; if (fl & 0x08){ defDur = dv.getUint32(p); p += 4; }
+      const tfdt = find(dv, traf, 'tfdt')[0]; let tOff = null, tVer = 0, t = 0;
+      if (tfdt){ tVer = dv.getUint8(tfdt.off + 8); tOff = tfdt.off + 12; t = tVer ? Number(dv.getBigUint64(tOff)) : dv.getUint32(tOff); }
+      let dur = 0;
+      for (const trun of find(dv, traf, 'trun')){
+        const rf = dv.getUint32(trun.off + 8) & 0xffffff, n = dv.getUint32(trun.off + 12);
+        let q = trun.off + 16; if (rf & 0x01) q += 4; if (rf & 0x04) q += 4;
+        for (let i = 0; i < n; i++){
+          if (rf & 0x100){ dur += dv.getUint32(q); q += 4; } else dur += defDur;
+          if (rf & 0x200) q += 4; if (rf & 0x400) q += 4; if (rf & 0x800) q += 4;
+        }
+      }
+      trafs.push({ id, bdo, tOff, tVer, t, dur });
+    }
+    const mfhd = find(dv, root, 'mfhd')[0];
+    return { dv, trafs, seqOff: mfhd ? mfhd.off + 12 : null };
+  }
+  async function join(blobs, type){
+    if (blobs.length === 1) return blobs[0];
+    const segs = [];
+    for (const blob of blobs){
+      const boxes = await topBoxes(blob);
+      const moovBox = boxes.find(b => b.type === 'moov'), ftyp = boxes.find(b => b.type === 'ftyp');
+      if (!moovBox || !ftyp) throw new Error('not fmp4');
+      const moov = new Uint8Array(await blob.slice(moovBox.off, moovBox.off + moovBox.size).arrayBuffer());
+      const init = parseMoov(moov);
+      const frags = [];
+      for (let i = 0; i < boxes.length; i++){
+        if (boxes[i].type !== 'moof') continue;
+        const md = boxes[i + 1]; if (!md || md.type !== 'mdat') continue;   // 欠けた断片は捨てる
+        const mb = new Uint8Array(await blob.slice(boxes[i].off, boxes[i].off + boxes[i].size).arrayBuffer());
+        frags.push({ bytes: mb, oldOff: boxes[i].off, info: parseMoof(mb, init), mdat: md });
+      }
+      const range = {};
+      for (const f of frags) for (const tr of f.info.trafs){
+        const r = range[tr.id] || (range[tr.id] = { a: Infinity, b: 0 });
+        r.a = Math.min(r.a, tr.t); r.b = Math.max(r.b, tr.t + tr.dur);
+      }
+      let D = 0;
+      for (const id in range){ const ts = init.tracks[id] ? init.tracks[id].ts : 0; if (ts && isFinite(range[id].a)) D = Math.max(D, (range[id].b - range[id].a) / ts); }
+      segs.push({ blob, ftyp, moov, init, frags, range, D });
+    }
+    const base = segs[0];
+    for (const s of segs) for (const id in s.init.tracks)
+      if (!base.init.tracks[id] || base.init.tracks[id].ts !== s.init.tracks[id].ts) throw new Error('track mismatch');
+    const moov = base.moov.slice();
+    const total = segs.reduce((a, s) => a + s.D, 0);
+    if (base.init.mehd){
+      const dv = new DataView(moov.buffer), v = Math.round(total * base.init.movieTs);
+      if (base.init.mehd.v) dv.setBigUint64(base.init.mehd.off + 12, BigInt(v)); else dv.setUint32(base.init.mehd.off + 12, v >>> 0);
+    }
+    const parts = [base.blob.slice(base.ftyp.off, base.ftyp.off + base.ftyp.size), moov];
+    let pos = base.ftyp.size + moov.byteLength, seq = 1, offset = 0;
+    for (const s of segs){
+      for (const f of s.frags){
+        const dv = f.info.dv;
+        if (f.info.seqOff !== null) dv.setUint32(f.info.seqOff, seq++);
+        for (const tr of f.info.trafs){
+          const ts = base.init.tracks[tr.id].ts, r = s.range[tr.id];
+          if (tr.tOff !== null){
+            const nv = tr.t - r.a + Math.round(offset * ts);
+            if (tr.tVer) dv.setBigUint64(tr.tOff, BigInt(nv)); else dv.setUint32(tr.tOff, nv >>> 0);
+          }
+          if (tr.bdo !== null){ const old = Number(dv.getBigUint64(tr.bdo)); dv.setBigUint64(tr.bdo, BigInt(old - f.oldOff + pos)); }
+        }
+        parts.push(f.bytes, s.blob.slice(f.mdat.off, f.mdat.off + f.mdat.size));
+        pos += f.bytes.byteLength + f.mdat.size;
+      }
+      offset += s.D;
+    }
+    return new Blob(parts, { type: type || 'video/mp4' });
+  }
+  return { join };
+})();
+
 /* ---------- recording ---------- */
-let recState = 'idle', rec = null, chunks = [], micStream = null, recBlob = null, recExt = 'mp4';
-let elapsed = 0, lastTick = 0, timerId = null;
+// recState: idle | starting | live | paused | busy
+let recState = 'idle', micStream = null, recStream = null;
 let recCanvas = null, rctx = null, recTrack = null, recFps = 30, lastFrameT = 0;
+let recMime = '', recExt = 'mp4', recOpts = {};
+let segs = [], take = null, takeSeq = 0, timerId = null;
+let recBlob = null, recParts = null, videoURL = null, savedOnce = false;
+const PAUSE_ICON = '<svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>';
+const PLAY_ICON = '<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>';
 const QUALITY = {
   light: { w: 1280, h: 720,  fps: 30, vbr: 2000000 },
   std:   { w: 1920, h: 1080, fps: 30, vbr: 4000000 },
@@ -557,18 +799,66 @@ const QUALITY = {
 try { const q = localStorage.getItem('bansho-quality'); if (q && QUALITY[q]) $('quality').value = q; } catch (e){}
 $('quality').onchange = () => { try { localStorage.setItem('bansho-quality', $('quality').value); } catch (e){} };
 function fmt(ms){ const s = Math.floor(ms / 1000); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
-function tick(){ if (recState === 'live'){ const n = performance.now(); elapsed += n - lastTick; lastTick = n; } $('recTime').textContent = fmt(elapsed); }
+function totalMs(){ return segs.reduce((a, s) => a + s.dur, 0) + (take ? performance.now() - take.t0 : 0); }
+function tick(){ $('recTime').textContent = fmt(totalMs()); }
 
-$('recBtn').onclick = () => { if (recState === 'idle') startRec(); else stopRec(); };
-$('pauseBtn').onclick = () => {
-  if (!rec) return;
-  if (recState === 'live'){ rec.pause(); recState = 'paused'; $('pauseBtn').innerHTML = '<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>再開'; toast('一時停止中'); }
-  else if (recState === 'paused'){ rec.resume(); recState = 'live'; lastTick = performance.now(); $('pauseBtn').innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>一時停止'; }
+function boardSnap(){ return { pages: pages.map(p => p.items.slice()), cur, grid, dark }; }
+function restoreSnap(s){
+  pages = s.pages.map(items => ({ items: items.slice(), undo: [], redo: [] }));
+  cur = Math.min(s.cur, pages.length - 1); grid = s.grid; $('gridBtn').setAttribute('aria-pressed', grid);
+  setDark(s.dark); sel = []; drawing = null; lasso = null; changed();
+}
+function setRecUI(){
+  const st = recState, on = st === 'live' || st === 'paused' || (st === 'busy' && timerId);
+  $('recTime').classList.toggle('hide', !on);
+  $('pauseBtn').classList.toggle('hide', !on);
+  $('rewindBtn').classList.toggle('hide', !on);
+  $('pauseBtn').innerHTML = st === 'paused' ? PLAY_ICON + '再開' : PAUSE_ICON + '一時停止';
+  $('rewindBtn').disabled = st === 'busy' || (st === 'paused' && !segs.length);
+  $('pauseBtn').disabled = st === 'busy';
+  $('recBtn').classList.toggle('live', !!on); $('recLabel').textContent = on ? '停止' : '録画';
+  $('recBtn').disabled = st === 'starting' || st === 'busy';
+  $('quality').disabled = $('ratioBtn').disabled = st !== 'idle';
+  $('quality').classList.toggle('hide', st !== 'idle');
+  $('recTime').style.color = st === 'paused' ? 'var(--muted)' : '';
+}
+
+function startTake(){
+  const r = new MediaRecorder(recStream, recOpts);
+  const t = { id: ++takeSeq, rec: r, chunks: [], n: 0, t0: performance.now(), startSnap: boardSnap() };
+  r.ondataavailable = e => { if (e.data && e.data.size){ t.chunks.push(e.data); idbPutChunk(t.id, t.n++, e.data); } };
+  r.start(1000);
+  take = t; recState = 'live'; setRecUI(); saveMeta();
+}
+async function finishTake(keep){
+  const t = take; if (!t) return; take = null;
+  const dur = performance.now() - t.t0;
+  await new Promise(res => { t.rec.onstop = () => setTimeout(res, 0); try { t.rec.stop(); } catch (e){ res(); } });
+  if (keep && t.chunks.length) segs.push({ id: t.id, chunks: t.chunks, dur, startSnap: t.startSnap });
+  else idbDeleteTake(t.id);
+  if (!recMime && t.rec.mimeType) recMime = t.rec.mimeType;
+  saveMeta();
+}
+
+$('recBtn').onclick = () => { if (recState === 'idle') startRec(); else if (recState === 'live' || recState === 'paused') stopRec(); };
+$('pauseBtn').onclick = async () => {
+  if (recState === 'live'){ recState = 'busy'; setRecUI(); await finishTake(true); recState = 'paused'; setRecUI(); toast('一時停止中。ミスしたら「戻る」でここまで戻れます'); }
+  else if (recState === 'paused'){ startTake(); }
 };
+$('rewindBtn').onclick = () => armConfirm($('rewindBtn'), 'もう一度押すと戻る', async () => {
+  if (recState === 'live'){
+    const snap = take.startSnap; recState = 'busy'; setRecUI();
+    await finishTake(false); restoreSnap(snap);
+    recState = 'paused'; setRecUI(); toast('一時停止したところまで戻りました。「再開」で撮り直せます');
+  } else if (recState === 'paused' && segs.length){
+    const s = segs.pop(); idbDeleteTake(s.id); restoreSnap(s.startSnap); saveMeta();
+    setRecUI(); tick(); toast('ひとつ前の区切りまで戻りました');
+  }
+});
 
 async function startRec(){
   if (!window.MediaRecorder || !cv.captureStream){ toast('このブラウザでは録画できません。iPadOSとSafariを最新にしてください', 4000); return; }
-  recState = 'starting'; $('recBtn').disabled = true;
+  recState = 'starting'; setRecUI();
   micStream = null;
   let micMsg = '';
   let framed = false; try { framed = window.self !== window.top; } catch (e){ framed = true; }
@@ -603,75 +893,136 @@ async function startRec(){
     vs = recCanvas.captureStream(Q.fps); recTrack = null;
   }
   recFps = Q.fps; lastFrameT = 0;
-  const stream = new MediaStream([...vs.getVideoTracks(), ...(micStream ? micStream.getAudioTracks() : [])]);
+  recStream = new MediaStream([...vs.getVideoTracks(), ...(micStream ? micStream.getAudioTracks() : [])]);
   const mime = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
-  recExt = /webm/.test(mime) ? 'webm' : 'mp4';
-  try { rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: Q.vbr, audioBitsPerSecond: 128000 } : {}); }
-  catch (e){ toast('録画を開始できませんでした'); cleanupRec(); return; }
-  chunks = [];
-  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-  rec.onstop = () => {
-    recBlob = new Blob(chunks, { type: rec.mimeType || mime || 'video/mp4' });
-    if (/webm/.test(recBlob.type)) recExt = 'webm';
-    cleanupRec(); showResult();
-  };
-  rec.start(1000);
-  recState = 'live'; elapsed = 0; lastTick = performance.now(); timerId = setInterval(tick, 250);
-  $('recBtn').disabled = false; $('recBtn').classList.add('live'); $('recLabel').textContent = '停止';
-  $('recTime').classList.remove('hide'); $('pauseBtn').classList.remove('hide'); $('quality').disabled = true;
+  recMime = mime; recExt = /webm/.test(mime) ? 'webm' : 'mp4';
+  recOpts = mime ? { mimeType: mime, videoBitsPerSecond: Q.vbr, audioBitsPerSecond: 128000 } : {};
+  segs = []; takeSeq = 0;
+  await idbClearRec();
+  try { startTake(); }
+  catch (e){ toast('録画を開始できませんでした'); teardownRec(); recState = 'idle'; setRecUI(); return; }
+  timerId = setInterval(tick, 250); tick(); setRecUI();
 }
-function stopRec(){ if (rec && rec.state !== 'inactive') rec.stop(); }
-function cleanupRec(){
-  if (micStream) micStream.getTracks().forEach(t => t.stop()); micStream = null;
-  clearInterval(timerId); recState = 'idle'; rec = null; if (recCanvas) recCanvas.remove(); recCanvas = null; rctx = null; recTrack = null; $('quality').disabled = false;
-  $('recBtn').disabled = false; $('recBtn').classList.remove('live'); $('recLabel').textContent = '録画';
-  $('recTime').classList.add('hide'); $('pauseBtn').classList.add('hide');
-  $('pauseBtn').innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>一時停止';
+function teardownRec(){
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  if (recStream) recStream.getTracks().forEach(t => t.stop());
+  micStream = recStream = null;
+  if (recCanvas) recCanvas.remove(); recCanvas = null; rctx = null; recTrack = null;
+  clearInterval(timerId); timerId = null;
 }
-let videoURL = null;
+async function stopRec(){
+  if (recState === 'live'){ recState = 'busy'; setRecUI(); await finishTake(true); }
+  recState = 'busy'; teardownRec(); setRecUI();
+  if (!segs.length){ recState = 'idle'; setRecUI(); idbClearRec(); toast('録画された場面がありません'); return; }
+  await buildVideo(segs.map(s => new Blob(s.chunks, { type: recMime || 'video/mp4' })));
+  recState = 'idle'; setRecUI();
+}
+async function buildVideo(blobs){
+  recBlob = null; recParts = null;
+  if (blobs.length > 1) toast('場面をつなげています…', 60000);
+  try { recBlob = await MP4.join(blobs, (recMime || 'video/mp4').split(';')[0]); }
+  catch (e){ console.error(e); recParts = blobs; recBlob = blobs[0]; }
+  if (/webm/.test(recBlob.type || recMime)) recExt = 'webm';
+  $('toast').classList.remove('show');
+  showResult();
+}
 function showResult(){
   if (videoURL) URL.revokeObjectURL(videoURL);
   videoURL = URL.createObjectURL(recBlob);
-  $('resultVideo').src = videoURL; $('saveNote').classList.add('hide');
+  savedOnce = false;
+  $('resultVideo').src = videoURL;
+  const note = $('saveNote');
+  if (recParts){ note.textContent = `場面をつなげられなかったため、${recParts.length}本の動画に分けて保存します（プレビューは1本目です）。`; note.classList.remove('hide'); }
+  else note.classList.add('hide');
+  $('discardBtn').textContent = '破棄して閉じる';
   $('resultDlg').showModal();
 }
-$('discardBtn').onclick = () => armConfirm($('discardBtn'), 'もう一度押すと破棄', () => {
-  $('resultVideo').removeAttribute('src'); $('resultVideo').load(); recBlob = null; $('resultDlg').close();
-});
-$('saveBtn').onclick = async () => {
-  const note = $('saveNote');
-  const d = new Date(), z = n => String(n).padStart(2, '0');
-  const name = `板書_${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}.${recExt}`;
-  // 1) Claude上で開いている場合
+function closeResult(){
+  $('resultVideo').removeAttribute('src'); $('resultVideo').load();
+  recBlob = null; recParts = null; segs = []; $('resultDlg').close(); idbClearRec();
+}
+$('discardBtn').onclick = () => { if (savedOnce) closeResult(); else armConfirm($('discardBtn'), 'もう一度押すと破棄', closeResult); };
+async function saveOne(blob, name, url){
   let dl = null;
   try { dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch (e){ dl = null; }
   if (dl){
-    try { await dl.save({ filename: name, data: recBlob }); toast('動画を保存しました'); }
-    catch (err){ if (!err || err.code !== 'declined'){ note.textContent = '保存できませんでした。もう一度お試しください。'; note.classList.remove('hide'); } }
-    return;
+    try { await dl.save({ filename: name, data: blob }); return 'ok'; }
+    catch (err){ return err && err.code === 'declined' ? 'cancel' : 'fail'; }
   }
-  // 2) iPad・iPhone：共有シートから「ビデオを保存」
-  const file = new File([recBlob], name, { type: recBlob.type || (recExt === 'webm' ? 'video/webm' : 'video/mp4') });
+  const file = new File([blob], name, { type: blob.type || (recExt === 'webm' ? 'video/webm' : 'video/mp4') });
   if (navigator.canShare && navigator.canShare({ files: [file] })){
-    try { await navigator.share({ files: [file] }); return; }
-    catch (err){ if (err && err.name === 'AbortError') return; }
+    try { await navigator.share({ files: [file] }); return 'ok'; }
+    catch (err){ if (err && err.name === 'AbortError') return 'cancel'; }
   }
-  // 3) パソコンなど：通常のダウンロード
   try {
-    const a = document.createElement('a'); a.href = videoURL; a.download = name;
+    const u = url || URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = u; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
-    toast('動画をダウンロードしました');
-  } catch (e){
-    note.textContent = '保存できませんでした。動画の再生画面を長押しして保存してください。'; note.classList.remove('hide');
+    if (!url) setTimeout(() => URL.revokeObjectURL(u), 60000);
+    return 'ok';
+  } catch (e){ return 'fail'; }
+}
+$('saveBtn').onclick = async () => {
+  const note = $('saveNote');
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  const stem = `板書_${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}`;
+  const list = recParts ? recParts.map((b, i) => [b, `${stem}_${i + 1}.${recExt}`, null]) : [[recBlob, `${stem}.${recExt}`, videoURL]];
+  for (const [b, name, url] of list){
+    const r = await saveOne(b, name, url);
+    if (r === 'cancel') return;
+    if (r === 'fail'){ note.textContent = '保存できませんでした。もう一度お試しください。'; note.classList.remove('hide'); return; }
   }
+  savedOnce = true; $('discardBtn').textContent = '閉じる';
+  toast('動画を保存しました');
 };
+
+/* ---------- 録画の途中保存と復元 ---------- */
+const pad6 = n => String(n).padStart(6, '0');
+async function recTx(mode, fn){
+  try {
+    const db = await openDB();
+    return await new Promise((res, rej) => {
+      const tx = db.transaction('rec', mode); const st = tx.objectStore('rec'); let out;
+      const r = fn(st); if (r) r.onsuccess = () => { out = r.result; };
+      tx.oncomplete = () => res(out); tx.onerror = () => rej(tx.error);
+    });
+  } catch (e){ return undefined; }
+}
+function idbPutChunk(id, i, blob){ recTx('readwrite', st => st.put(blob, `c:${pad6(id)}:${pad6(i)}`)); }
+function idbDeleteTake(id){ recTx('readwrite', st => st.delete(IDBKeyRange.bound(`c:${pad6(id)}:`, `c:${pad6(id)}:\uffff`))); }
+function idbClearRec(){ return recTx('readwrite', st => st.clear()); }
+function saveMeta(){
+  recTx('readwrite', st => st.put({ ids: segs.map(s => s.id).concat(take ? [take.id] : []), mime: recMime, ext: recExt, ms: totalMs() }, 'meta'));
+}
+async function checkRecovery(){
+  const meta = await recTx('readonly', st => st.get('meta'));
+  if (!meta || !meta.ids || !meta.ids.length) return;
+  $('recoverText').textContent = `前回の録画（約${Math.max(1, Math.round((meta.ms || 0) / 60000))}分）が保存されないまま残っています。動画にしますか？`;
+  $('recoverDlg').showModal();
+  $('recoverDiscard').onclick = () => armConfirm($('recoverDiscard'), 'もう一度押すと破棄', () => { idbClearRec(); $('recoverDlg').close(); });
+  $('recoverOk').onclick = async () => {
+    $('recoverDlg').close();
+    const blobs = [];
+    for (const id of meta.ids){
+      const parts = await recTx('readonly', st => st.getAll(IDBKeyRange.bound(`c:${pad6(id)}:`, `c:${pad6(id)}:\uffff`)));
+      if (parts && parts.length) blobs.push(new Blob(parts, { type: meta.mime || 'video/mp4' }));
+    }
+    if (!blobs.length){ toast('復元できる映像がありませんでした'); idbClearRec(); return; }
+    recMime = meta.mime || ''; recExt = meta.ext || 'mp4';
+    await buildVideo(blobs);
+  };
+}
 
 /* ---------- autosave (IndexedDB) ---------- */
 let dbP = null;
 function openDB(){
   if (!dbP) dbP = new Promise((res, rej) => {
-    const r = indexedDB.open('bansho-recorder', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    const r = indexedDB.open('bansho-recorder', 2);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      if (!db.objectStoreNames.contains('rec')) db.createObjectStore('rec');
+    };
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   });
   return dbP;
@@ -699,7 +1050,7 @@ async function load(){
   layerDirty = needsRender = true; updateUI();
 }
 
-fit(); updateUI(); load(); requestAnimationFrame(loop);
+fit(); updateUI(); load().then(checkRecovery); requestAnimationFrame(loop);
 })();
 </script>
 </body>
