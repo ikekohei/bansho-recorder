@@ -61,6 +61,7 @@ aside hr{border:0;border-top:1px solid var(--line);margin:4px 2px;width:auto}
 .size{gap:6px;justify-content:flex-start;padding-left:12px}
 .size i{display:block;border-radius:50%;background:currentColor;flex:none}
 .size b{font-size:12px;font-weight:500}
+.emode{justify-content:center;padding-left:0}
 .size[aria-pressed="true"]{border:2px solid var(--ink)}
 main{position:relative;background:var(--wall);display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;padding:6px}
 #board{display:block;background:#fff;border-radius:6px;box-shadow:0 0 0 4px var(--frame),0 6px 18px rgba(0,0,0,.18);touch-action:none}
@@ -98,7 +99,7 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
     <div class="grp">
       <button id="gridBtn" class="toggle" aria-pressed="false">方眼</button>
       <button id="darkBtn" class="toggle" aria-pressed="false">黒板</button>
-      <button id="ratioBtn" aria-label="ボードの縦横比">16:9</button>
+      <button id="ratioBtn" aria-label="ボードの縦横比">4:3</button>
       <button id="importBtn"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 16l5-5 4 4 3-3 4 4"/></svg>PDF・画像</button>
       <input id="file" type="file" accept="image/*,application/pdf" multiple class="hide">
     </div>
@@ -128,12 +129,19 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
     <button class="tool" data-tool="eraser" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M4 15l9-9 6 6-8 8H8z"/></svg>消しゴム</button>
     <button class="tool" data-tool="laser" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>レーザー</button>
     <button class="tool" data-tool="move" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M5 5h3M11 5h3M17 5h2v2M19 10v3M19 16v3h-2M14 19h-3M8 19H5v-2M5 14v-3M5 8V5" /></svg>選択</button>
+    <div id="eraseGroup" style="display:none;flex-direction:column;gap:6px">
+      <hr>
+      <button class="size emode" data-emode="part" aria-pressed="true"><b>部分</b></button>
+      <button class="size emode" data-emode="stroke" aria-pressed="false"><b>線ごと</b></button>
+    </div>
     <div id="inkGroup" style="display:contents">
+    <div id="colorGroup" style="display:contents">
     <hr>
     <button class="cap" data-color="#1a1a1a" aria-label="黒" aria-pressed="true" style="--c:#1a1a1a"><span></span></button>
     <button class="cap" data-color="#d62828" aria-label="赤" aria-pressed="false" style="--c:#d62828"><span></span></button>
     <button class="cap" data-color="#1f5fbf" aria-label="青" aria-pressed="false" style="--c:#1f5fbf"><span></span></button>
     <button class="cap hlOnly hide" data-color="#ffd400" aria-label="黄" aria-pressed="false" style="--c:#ffd400"><span></span></button>
+    </div>
     <hr>
     <button class="size" data-size="2.5" aria-label="細" aria-pressed="false"><i style="width:4px;height:4px"></i><b>細</b></button>
     <button class="size" data-size="4.5" aria-label="中" aria-pressed="true"><i style="width:8px;height:8px"></i><b>中</b></button>
@@ -180,7 +188,7 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
 <script>
 (() => {
 const W = 1920, H = 1080;
-let VW = 1920, X0 = 0, dark = false;
+let VW = 1440, X0 = 240, dark = false;   // 既定はiPadの画面に近い4:3
 const cv = document.getElementById('board');
 cv.width = W; cv.height = H;
 const ctx = cv.getContext('2d');
@@ -329,9 +337,13 @@ function render(){
       ctx.beginPath(); ctx.moveTo(lasso[0].x, lasso[0].y); for (const q of lasso) ctx.lineTo(q.x, q.y); ctx.closePath(); ctx.stroke(); ctx.restore();
     }
   }
+  if (!erasing && hoverPt && tool === 'eraser'){
+    ctx.save(); ctx.strokeStyle = dark ? 'rgba(255,255,255,.45)' : 'rgba(30,43,55,.4)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(hoverPt.x, hoverPt.y, eraseR(), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  }
   if (erasing && erasing.pt){
     ctx.save(); ctx.strokeStyle = dark ? 'rgba(255,255,255,.6)' : 'rgba(30,43,55,.55)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(erasing.pt.x, erasing.pt.y, ERASE_R, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    ctx.beginPath(); ctx.arc(erasing.pt.x, erasing.pt.y, eraseR(), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
   }
   const now = performance.now();
   laser = laser.filter(l => now - l.t < 700);
@@ -371,7 +383,9 @@ function undo(){ const pg = page(); if (!pg.undo.length) return; pg.redo.push(pg
 function redo(){ const pg = page(); if (!pg.redo.length) return; pg.undo.push(pg.items); pg.items = pg.redo.pop(); sel = []; changed(); }
 
 /* ---------- pointer ---------- */
-const ERASE_R = 22;
+const ERASE_SIZES = { 2.5: 7, 4.5: 14, 8: 30 };
+let eraseKey = 4.5, eraseMode = 'part', hoverPt = null;
+const eraseR = () => ERASE_SIZES[eraseKey] || 14;
 function toBoard(e){
   const r = cv.getBoundingClientRect();
   return { x: X0 + (e.clientX - r.left) * VW / r.width, y: (e.clientY - r.top) * H / r.height,
@@ -382,16 +396,38 @@ function segDist(px, py, a, b){
   let t = L ? ((px - a.x)*dx + (py - a.y)*dy) / L : 0; t = Math.max(0, Math.min(1, t));
   const x = a.x + t*dx, y = a.y + t*dy; return Math.hypot(px - x, py - y);
 }
+function resample(p, step){
+  if (p.length < 2) return p;
+  const o = [p[0]];
+  for (let i = 1; i < p.length; i++){
+    const a = p[i-1], b = p[i], d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.floor(d / step);
+    for (let k = 1; k <= n; k++){ const t = k * step / d; if (t < 1) o.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, p: a.p + (b.p - a.p) * t }); }
+    o.push(b);
+  }
+  return o;
+}
 function eraseAt(pt){
-  const pg = page(); let hit = false;
-  pg.items = pg.items.filter(it => {
-    if (it.type !== 'stroke') return true;
-    const r = ERASE_R + it.size / 2, p = it.pts;
-    if (p.length === 1){ if (Math.hypot(p[0].x - pt.x, p[0].y - pt.y) < r){ hit = true; return false; } return true; }
-    for (let i = 1; i < p.length; i++) if (segDist(pt.x, pt.y, p[i-1], p[i]) < r){ hit = true; return false; }
-    return true;
-  });
-  if (hit){ erasing.hit = true; layerDirty = true; }
+  const pg = page(), R0 = eraseR(); let hit = false;
+  const out = [];
+  for (const it of pg.items){
+    if (it.type !== 'stroke'){ out.push(it); continue; }
+    const r = R0 + it.size / 2, p = it.pts;
+    const near = p.length === 1 ? Math.hypot(p[0].x - pt.x, p[0].y - pt.y) < r : p.some((q, k) => k && segDist(pt.x, pt.y, p[k-1], q) < r);
+    if (!near){ out.push(it); continue; }
+    hit = true;
+    if (eraseMode === 'stroke') continue;
+    // 部分消し：消しゴムの円にかかった点だけ取り除き、残りを別々の線に分ける
+    const q = resample(p, Math.max(1.5, R0 / 4));
+    let run = [];
+    const flush = () => { if (run.length >= 2) out.push({ ...it, pts: run }); run = []; };
+    for (const v of q){ if (Math.hypot(v.x - pt.x, v.y - pt.y) < r) flush(); else run.push(v); }
+    flush();
+  }
+  if (hit){ pg.items = out; erasing.hit = true; layerDirty = true; }
+}
+function eraseAlong(a, b){
+  const step = Math.max(2, eraseR() / 2), d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.ceil(d / step);
+  for (let k = 1; k <= n; k++) eraseAt({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n });
 }
 function bbox(items){
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -473,10 +509,11 @@ cv.addEventListener('pointerdown', e => {
 
 
 cv.addEventListener('pointermove', e => {
+  if (activeId === null && tool === 'eraser' && e.pointerType !== 'touch'){ hoverPt = toBoard(e); needsRender = true; }
   if (e.pointerId !== activeId) return;
   const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   if (drawing){ for (const ev of (evs.length ? evs : [e])){ const pt = toBoard(ev); const L = drawing.pts[drawing.pts.length-1]; if (Math.hypot(pt.x - L.x, pt.y - L.y) > 0.6){ pt.p = L.p * 0.65 + pt.p * 0.35; drawing.pts.push(pt); } } }
-  else if (erasing){ for (const ev of (evs.length ? evs : [e])) { erasing.pt = toBoard(ev); eraseAt(erasing.pt); } }
+  else if (erasing){ for (const ev of (evs.length ? evs : [e])) { const np = toBoard(ev); eraseAlong(erasing.pt, np); erasing.pt = np; } }
   else if (tool === 'laser'){ for (const ev of (evs.length ? evs : [e])){ const pt = toBoard(ev); laser.push({ x: pt.x, y: pt.y, t: performance.now() }); } }
   else if (drag){
     const pt = toBoard(e);
@@ -510,6 +547,7 @@ function endPointer(e){
   laserDown = false; needsRender = true;
 }
 cv.addEventListener('pointerup', endPointer);
+cv.addEventListener('pointerleave', () => { if (hoverPt){ hoverPt = null; needsRender = true; } });
 cv.addEventListener('pointercancel', endPointer);
 stage.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 
@@ -524,7 +562,14 @@ function syncColors(){
   document.querySelectorAll('[data-color]').forEach(x => x.setAttribute('aria-pressed', x.dataset.color === c));
   document.querySelectorAll('.hlOnly').forEach(x => x.classList.toggle('hide', !hl));
   document.querySelectorAll('[data-color]').forEach(x => x.style.setProperty('--c', ink(x.dataset.color)));
-  $('inkGroup').style.display = (tool === 'pen' || tool === 'hl') ? 'contents' : 'none';
+  const er = tool === 'eraser';
+  $('inkGroup').style.display = (tool === 'pen' || tool === 'hl' || er) ? 'contents' : 'none';
+  $('colorGroup').style.display = er ? 'none' : 'contents';
+  $('eraseGroup').style.display = er ? 'flex' : 'none';
+  const k = er ? eraseKey : size;
+  document.querySelectorAll('[data-size]').forEach(x => x.setAttribute('aria-pressed', +x.dataset.size === k));
+  document.querySelectorAll('[data-emode]').forEach(x => x.setAttribute('aria-pressed', x.dataset.emode === eraseMode));
+  if (!er) hoverPt = null;
 }
 document.querySelectorAll('[data-color]').forEach(b => b.onclick = () => {
   if (tool === 'hl'){ hlColor = b.dataset.color; syncColors(); return; }
@@ -532,9 +577,10 @@ document.querySelectorAll('[data-color]').forEach(b => b.onclick = () => {
   if (tool !== 'pen') document.querySelector('[data-tool="pen"]').click(); else syncColors();
 });
 document.querySelectorAll('[data-size]').forEach(b => b.onclick = () => {
-  size = +b.dataset.size;
-  document.querySelectorAll('[data-size]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  if (tool === 'eraser') eraseKey = +b.dataset.size; else size = +b.dataset.size;
+  syncColors();
 });
+document.querySelectorAll('[data-emode]').forEach(b => b.onclick = () => { eraseMode = b.dataset.emode; syncColors(); });
 $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 $('clearBtn').onclick = () => {
   const pg = page(); if (!pg.items.some(i => i.type === 'stroke')) return;
@@ -799,6 +845,225 @@ const MP4 = (() => {
   return { join };
 })();
 
+/* ---------- 録画した場面を、普通のMP4（長さ情報つき）に組み直す ---------- */
+const MP4F = (() => {
+  const s4 = (dv, o) => String.fromCharCode(dv.getUint8(o), dv.getUint8(o+1), dv.getUint8(o+2), dv.getUint8(o+3));
+  const CONTAINERS = new Set(['moov', 'trak', 'mdia', 'minf', 'stbl', 'mvex', 'moof', 'traf', 'edts', 'dinf', 'udta']);
+  async function topBoxes(blob){
+    const out = []; let off = 0;
+    while (off + 8 <= blob.size){
+      const dv = new DataView(await blob.slice(off, Math.min(blob.size, off + 16)).arrayBuffer());
+      let size = dv.getUint32(0), hdr = 8; const type = s4(dv, 4);
+      if (size === 1){ if (dv.byteLength < 16) break; size = Number(dv.getBigUint64(8)); hdr = 16; }
+      else if (size === 0) size = blob.size - off;
+      if (size < hdr || off + size > blob.size) break;
+      out.push({ type, off, size, hdr }); off += size;
+    }
+    return out;
+  }
+  // バイト列を箱の木に分解する
+  function parse(u8, start = 0, end = u8.byteLength){
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const out = []; let o = start;
+    while (o + 8 <= end){
+      let size = dv.getUint32(o), hdr = 8; const type = s4(dv, o + 4);
+      if (size === 1){ size = Number(dv.getBigUint64(o + 8)); hdr = 16; } else if (size === 0) size = end - o;
+      if (size < hdr || o + size > end) break;
+      const b = { type, off: o, size, hdr, raw: u8.subarray(o, o + size) };
+      if (CONTAINERS.has(type)) b.kids = parse(u8, o + hdr, o + size);
+      out.push(b); o += size;
+    }
+    return out;
+  }
+  const kid = (b, t) => b.kids && b.kids.find(k => k.type === t);
+  const kidsOf = (b, t) => (b.kids || []).filter(k => k.type === t);
+  const dvOf = b => new DataView(b.raw.buffer, b.raw.byteOffset, b.raw.byteLength);
+  // 書き出し用
+  const cat = arrs => { const n = arrs.reduce((a, x) => a + x.byteLength, 0), o = new Uint8Array(n); let p = 0; for (const x of arrs){ o.set(x, p); p += x.byteLength; } return o; };
+  const u32 = n => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n >>> 0); return b; };
+  const i32 = n => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, n | 0); return b; };
+  const u64 = n => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n)); return b; };
+  const fourcc = t => new Uint8Array([...t].map(c => c.charCodeAt(0)));
+  const box = (t, ...p) => { const body = cat(p); return cat([u32(body.byteLength + 8), fourcc(t), body]); };
+  const full = (t, v, f, ...p) => box(t, new Uint8Array([v, (f >> 16) & 255, (f >> 8) & 255, f & 255]), ...p);
+
+  function readInit(moovBytes){
+    const moov = parse(moovBytes)[0];
+    const mvhd = kid(moov, 'mvhd'); const mv = dvOf(mvhd);
+    const movieTs = mv.getUint32(mv.getUint8(8) ? 28 : 20);
+    const tracks = {};
+    for (const trak of kidsOf(moov, 'trak')){
+      const td = dvOf(kid(trak, 'tkhd')); const id = td.getUint32(td.getUint8(8) ? 28 : 20);
+      const mdia = kid(trak, 'mdia'); const md = dvOf(kid(mdia, 'mdhd'));
+      const hd = dvOf(kid(mdia, 'hdlr'));
+      tracks[id] = { id, trak, ts: md.getUint32(md.getUint8(8) ? 28 : 20), handler: s4(hd, 16), def: { dur: 0, size: 0, flags: 0 } };
+    }
+    const mvex = kid(moov, 'mvex');
+    if (mvex) for (const t of kidsOf(mvex, 'trex')){
+      const d = dvOf(t), id = d.getUint32(12);
+      if (tracks[id]) tracks[id].def = { dur: d.getUint32(20), size: d.getUint32(24), flags: d.getUint32(28) };
+    }
+    return { moov, movieTs, tracks };
+  }
+
+  // 1つの場面から、トラックごとのサンプル（長さ・大きさ・位置）を取り出す
+  async function readSegment(blob){
+    const boxes = await topBoxes(blob);
+    const mb = boxes.find(b => b.type === 'moov'); if (!mb) throw new Error('no moov');
+    const init = readInit(new Uint8Array(await blob.slice(mb.off, mb.off + mb.size).arrayBuffer()));
+    const runs = [];   // { id, off, size, samples:[{dur,size,flags,cto}] } 元ファイル内での並び順
+    for (let i = 0; i < boxes.length; i++){
+      if (boxes[i].type !== 'moof') continue;
+      const md = boxes[i + 1]; if (!md || md.type !== 'mdat') continue;
+      const moofOff = boxes[i].off;
+      const moof = parse(new Uint8Array(await blob.slice(moofOff, moofOff + boxes[i].size).arrayBuffer()))[0];
+      let prevEnd = moofOff;
+      kidsOf(moof, 'traf').forEach((traf, ti) => {
+        const th = dvOf(kid(traf, 'tfhd')); const fl = th.getUint32(8) & 0xffffff, id = th.getUint32(12);
+        const tr = init.tracks[id]; if (!tr) return;
+        let p = 16, base = ti === 0 ? moofOff : prevEnd;
+        let dDur = tr.def.dur, dSize = tr.def.size, dFlags = tr.def.flags;
+        if (fl & 0x01){ base = Number(th.getBigUint64(p)); p += 8; }
+        if (fl & 0x02) p += 4;
+        if (fl & 0x08){ dDur = th.getUint32(p); p += 4; }
+        if (fl & 0x10){ dSize = th.getUint32(p); p += 4; }
+        if (fl & 0x20){ dFlags = th.getUint32(p); p += 4; }
+        if (fl & 0x020000) base = moofOff;
+        let cursor = base;
+        for (const trun of kidsOf(traf, 'trun')){
+          const d = dvOf(trun), rf = d.getUint32(8) & 0xffffff, n = d.getUint32(12), ver = d.getUint8(8);
+          let q = 16, first = null;
+          if (rf & 0x01){ cursor = base + d.getInt32(q); q += 4; }
+          if (rf & 0x04){ first = d.getUint32(q); q += 4; }
+          const samples = []; let total = 0;
+          for (let k = 0; k < n; k++){
+            const s = { dur: dDur, size: dSize, flags: k === 0 && first !== null ? first : dFlags, cto: 0 };
+            if (rf & 0x100){ s.dur = d.getUint32(q); q += 4; }
+            if (rf & 0x200){ s.size = d.getUint32(q); q += 4; }
+            if (rf & 0x400){ s.flags = d.getUint32(q); q += 4; }
+            if (rf & 0x800){ s.cto = ver ? d.getInt32(q) : d.getUint32(q); q += 4; }
+            samples.push(s); total += s.size;
+          }
+          if (cursor < md.off || cursor + total > md.off + md.size) throw new Error('data outside mdat');
+          runs.push({ id, off: cursor, size: total, samples });
+          cursor += total;
+        }
+        prevEnd = cursor;
+      });
+    }
+    return { blob, init, runs };
+  }
+
+  function stbl(stsdRaw, t, offsets, co64){
+    const parts = [stsdRaw];
+    // stts
+    const stts = []; for (const s of t.samples){ const L = stts[stts.length - 1]; if (L && L[1] === s.dur) L[0]++; else stts.push([1, s.dur]); }
+    parts.push(full('stts', 0, 0, u32(stts.length), ...stts.flatMap(([c, d]) => [u32(c), u32(d)])));
+    // ctts
+    if (t.samples.some(s => s.cto)){
+      const neg = t.samples.some(s => s.cto < 0), e = [];
+      for (const s of t.samples){ const L = e[e.length - 1]; if (L && L[1] === s.cto) L[0]++; else e.push([1, s.cto]); }
+      parts.push(full('ctts', neg ? 1 : 0, 0, u32(e.length), ...e.flatMap(([c, o]) => [u32(c), neg ? i32(o) : u32(o)])));
+    }
+    // stss（映像のキーフレーム）
+    if (t.handler === 'vide'){
+      const sync = []; t.samples.forEach((s, i) => { if (!(s.flags & 0x10000)) sync.push(i + 1); });
+      if (sync.length && sync.length < t.samples.length) parts.push(full('stss', 0, 0, u32(sync.length), ...sync.map(u32)));
+    }
+    // stsc
+    const stsc = []; t.chunks.forEach((n, i) => { const L = stsc[stsc.length - 1]; if (!L || L[1] !== n) stsc.push([i + 1, n]); });
+    parts.push(full('stsc', 0, 0, u32(stsc.length), ...stsc.flatMap(([f, n]) => [u32(f), u32(n), u32(1)])));
+    parts.push(full('stsz', 0, 0, u32(0), u32(t.samples.length), ...t.samples.map(s => u32(s.size))));
+    parts.push(co64 ? full('co64', 0, 0, u32(offsets.length), ...offsets.map(u64)) : full('stco', 0, 0, u32(offsets.length), ...offsets.map(u32)));
+    return box('stbl', ...parts);
+  }
+  function patchDur(raw, vOff32, vOff64, value){
+    const c = raw.slice(), d = new DataView(c.buffer);
+    if (d.getUint8(8)) d.setBigUint64(vOff64, BigInt(value)); else d.setUint32(vOff32, value >>> 0);
+    return c;
+  }
+  function buildMoov(init, T, offsetsById, co64){
+    const parts = [];
+    let movieDur = 0;
+    for (const id in T) movieDur = Math.max(movieDur, Math.round(T[id].total / T[id].ts * init.movieTs));
+    for (const b of init.moov.kids){
+      if (b.type === 'mvhd') parts.push(patchDur(b.raw, 24, 32, movieDur));
+      else if (b.type === 'trak'){
+        const tr = Object.values(init.tracks).find(x => x.trak === b); const t = tr && T[tr.id];
+        if (!t || !t.samples.length) continue;
+        const tp = [];
+        for (const c of b.kids){
+          if (c.type === 'tkhd') tp.push(patchDur(c.raw, 28, 36, Math.round(t.total / t.ts * init.movieTs)));
+          else if (c.type === 'edts') continue;
+          else if (c.type === 'mdia'){
+            const mp = [];
+            for (const m of c.kids){
+              if (m.type === 'mdhd') mp.push(patchDur(m.raw, 24, 32, t.total));
+              else if (m.type === 'minf'){
+                const np = [];
+                for (const n of m.kids){
+                  if (n.type === 'stbl') np.push(stbl(kid(n, 'stsd').raw, t, offsetsById[tr.id], co64));
+                  else np.push(n.raw);
+                }
+                mp.push(box('minf', ...np));
+              } else mp.push(m.raw);
+            }
+            tp.push(box('mdia', ...mp));
+          } else tp.push(c.raw);
+        }
+        parts.push(box('trak', ...tp));
+      }
+      else if (b.type === 'mvex') continue;
+      else parts.push(b.raw);
+    }
+    return box('moov', ...parts);
+  }
+
+  async function finalize(blobs, type){
+    const segs = [];
+    for (const b of blobs) segs.push(await readSegment(b));
+    const init = segs[0].init;
+    const T = {};
+    for (const id in init.tracks) T[id] = { ...init.tracks[id], samples: [], chunks: [], total: 0 };
+    const pieces = [];      // 出力するデータの並び（元の場面ファイルの切り出し）
+    const chunkTrack = [];  // pieces と同じ順で、どのトラックのチャンクか
+    for (const s of segs){
+      for (const id in s.init.tracks) if (!T[id] || T[id].ts !== s.init.tracks[id].ts) throw new Error('track mismatch');
+      const segTot = {};
+      for (const r of s.runs){
+        const t = T[r.id]; if (!r.samples.length) continue;
+        t.samples.push(...r.samples); t.chunks.push(r.samples.length);
+        const d = r.samples.reduce((a, x) => a + x.dur, 0); t.total += d; segTot[r.id] = (segTot[r.id] || 0) + d;
+        pieces.push(s.blob.slice(r.off, r.off + r.size)); chunkTrack.push({ id: r.id, size: r.size });
+      }
+      // 場面の終わりで映像と音声の位置をそろえる（短い方の最後のサンプルを少しのばす）
+      let D = 0; for (const id in segTot) D = Math.max(D, segTot[id] / T[id].ts);
+      for (const id in segTot){
+        const want = Math.round(D * T[id].ts), pad = want - segTot[id], t = T[id];
+        if (pad > 0 && t.samples.length){ const last = t.samples.length - 1; t.samples[last] = { ...t.samples[last], dur: t.samples[last].dur + pad }; t.total += pad; }
+      }
+    }
+    if (!Object.values(T).some(t => t.samples.length)) throw new Error('no samples');
+    const ftyp = box('ftyp', fourcc('isom'), u32(512), fourcc('isom'), fourcc('iso2'), fourcc('avc1'), fourcc('mp41'));
+    const dataSize = chunkTrack.reduce((a, c) => a + c.size, 0);
+    const mdatHdr = dataSize + 8 > 0xffffffff ? 16 : 8;
+    const layout = (moovSize, co64) => {
+      const off = {}; for (const id in T) off[id] = [];
+      let p = ftyp.byteLength + moovSize + mdatHdr;
+      for (const c of chunkTrack){ off[c.id].push(p); p += c.size; }
+      return { off, need64: p > 0xffffffff };
+    };
+    let co64 = false;
+    let moov = buildMoov(init, T, layout(0, false).off, co64);
+    let L = layout(moov.byteLength, co64);
+    if (L.need64){ co64 = true; moov = buildMoov(init, T, L.off, co64); L = layout(moov.byteLength, co64); }
+    moov = buildMoov(init, T, L.off, co64);
+    const mdatHead = mdatHdr === 8 ? cat([u32(dataSize + 8), fourcc('mdat')]) : cat([u32(1), fourcc('mdat'), u64(dataSize + 16)]);
+    return new Blob([ftyp, moov, mdatHead, ...pieces], { type: type || 'video/mp4' });
+  }
+  return { finalize };
+})();
+
 /* ---------- recording ---------- */
 // recState: idle | starting | live | paused | busy
 let recState = 'idle', micStream = null, recStream = null;
@@ -809,9 +1074,10 @@ let recBlob = null, recParts = null, videoURL = null, savedOnce = false;
 const PAUSE_ICON = '<svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>';
 const PLAY_ICON = '<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>';
 const QUALITY = {
-  light: { w: 1280, h: 720,  fps: 30, vbr: 2000000 },
-  std:   { w: 1920, h: 1080, fps: 30, vbr: 4000000 },
-  high:  { w: 1920, h: 1080, fps: 60, vbr: 8000000 },
+  // 板書は動きが少ないので、低いビットレートでも文字はくっきり残る（目安：標準で5分≒18MB）
+  light: { w: 1280, h: 720,  fps: 30, vbr: 250000,  abr: 64000 },
+  std:   { w: 1920, h: 1080, fps: 30, vbr: 400000,  abr: 96000 },
+  high:  { w: 1920, h: 1080, fps: 30, vbr: 1500000, abr: 128000 },
 };
 try { const q = localStorage.getItem('bansho-quality'); if (q && QUALITY[q]) $('quality').value = q; } catch (e){}
 $('quality').onchange = () => { try { localStorage.setItem('bansho-quality', $('quality').value); } catch (e){} };
@@ -933,7 +1199,7 @@ async function startRec(){
   recStream = new MediaStream([...vs.getVideoTracks(), ...(micStream ? boostMic(micStream, +$('gainSel').value || 1) : [])]);
   const mime = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
   recMime = mime; recExt = /webm/.test(mime) ? 'webm' : 'mp4';
-  recOpts = mime ? { mimeType: mime, videoBitsPerSecond: Q.vbr, audioBitsPerSecond: 128000 } : {};
+  recOpts = mime ? { mimeType: mime, videoBitsPerSecond: Q.vbr, audioBitsPerSecond: Q.abr } : {};
   segs = []; takeSeq = 0;
   await idbClearRec();
   try { startTake(); }
@@ -957,9 +1223,14 @@ async function stopRec(){
 }
 async function buildVideo(blobs){
   recBlob = null; recParts = null;
-  if (blobs.length > 1) toast('場面をつなげています…', 60000);
-  try { recBlob = await MP4.join(blobs, (recMime || 'video/mp4').split(';')[0]); }
-  catch (e){ console.error(e); recParts = blobs; recBlob = blobs[0]; }
+  toast('動画を仕上げています…', 60000);
+  const type = (recMime || 'video/mp4').split(';')[0];
+  try { recBlob = await MP4F.finalize(blobs, type); }                 // 普通のMP4（長さ情報つき）に組み直す
+  catch (e1){
+    console.error(e1);
+    try { recBlob = await MP4.join(blobs, type); }                       // だめなら断片のままつなぐ
+    catch (e2){ console.error(e2); recParts = blobs; recBlob = blobs[0]; } // それもだめなら場面ごとに
+  }
   if (/webm/.test(recBlob.type || recMime)) recExt = 'webm';
   $('toast').classList.remove('show');
   showResult();
@@ -1082,7 +1353,7 @@ async function load(){
       pages = data.pages.map(p => ({ items: p.items || [], undo: [], redo: [] }));
       cur = Math.min(data.cur || 0, pages.length - 1); grid = !!data.grid;
       $('gridBtn').setAttribute('aria-pressed', grid);
-      setDark(!!data.dark); setRatio(data.ratio || '16:9');
+      setDark(!!data.dark); setRatio(data.ratio || '4:3');
     }
   } catch (e){}
   layerDirty = needsRender = true; updateUI();
