@@ -123,8 +123,8 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
         </select></label>
       <label class="iconSel" id="qualityWrap" title="画質"><span id="qualityIcon"></span>
         <select id="quality" aria-label="画質">
-          <option value="light">画質：軽量（5分≒10MB）</option>
-          <option value="std" selected>画質：標準（5分≒18MB）</option>
+          <option value="light">画質：軽量（5分≒12MB）</option>
+          <option value="std" selected>画質：標準（5分≒25MB）</option>
           <option value="high">画質：高画質（5分≒60MB）</option>
         </select></label>
       <span id="recTime" class="hide">00:00</span>
@@ -1159,10 +1159,10 @@ let recBlob = null, recParts = null, videoURL = null, savedOnce = false;
 const PAUSE_ICON = '<svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>';
 const PLAY_ICON = '<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>';
 const QUALITY = {
-  // 板書は動きが少ないので、低いビットレートでも文字はくっきり残る（目安：標準で5分≒18MB）
-  light: { w: 1280, h: 720,  fps: 30, vbr: 250000,  abr: 64000 },
-  std:   { w: 1920, h: 1080, fps: 30, vbr: 400000,  abr: 96000 },
-  high:  { w: 1920, h: 1080, fps: 30, vbr: 1500000, abr: 128000 },
+  // iPadのSafariは指定の6割ほどしか使わず、毎秒キーフレームを入れるので、少し多めに指定する
+  light: { w: 1280, h: 720,  fps: 30, vbr: 500000,  abr: 64000 },
+  std:   { w: 1920, h: 1080, fps: 30, vbr: 1000000, abr: 96000 },
+  high:  { w: 1920, h: 1080, fps: 30, vbr: 2500000, abr: 128000 },
 };
 try { const q = localStorage.getItem('bansho-quality'); if (q && QUALITY[q]) $('quality').value = q; } catch (e){}
 // 音量はスピーカーの波の数、画質は画面の中の棒の数で表す（1〜3）
