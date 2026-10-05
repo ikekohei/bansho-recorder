@@ -33,6 +33,8 @@ body{height:100%;margin:0;background:var(--chrome);color:var(--ink);
 #app{height:100%;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto 1fr}
 header{grid-column:1/3;display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .grp{display:flex;align-items:center;gap:4px}
+/* 全画面時は左上にSafariの✕ボタンが重なるので、その分あける */
+html.fs header{padding-left:84px}
 .sep{flex:1}
 button{font:inherit;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:10px;
   min-width:44px;height:44px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;
@@ -102,6 +104,11 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
     </div>
     <div class="sep"></div>
     <div class="grp">
+      <select id="gainSel" aria-label="録音の音量" title="録音の音量">
+        <option value="1">音量 標準</option>
+        <option value="2.5" selected>音量 大</option>
+        <option value="4">音量 特大</option>
+      </select>
       <select id="quality" aria-label="画質">
         <option value="light">軽量</option>
         <option value="std" selected>標準</option>
@@ -417,20 +424,21 @@ function lassoSelect(poly){
   });
 }
 function hitAt(pt){
-  const items = page().items;
+  const items = page().items; let lockedHit = null;
   for (let i = items.length - 1; i >= 0; i--){
-    const it = items[i]; if (it.locked) continue;
+    const it = items[i];
+    if (it.locked){ if (pt.x >= it.x && pt.x <= it.x + it.w && pt.y >= it.y && pt.y <= it.y + it.h) lockedHit = lockedHit || it; continue; }
     if (it.type === 'image'){ if (pt.x >= it.x && pt.x <= it.x + it.w && pt.y >= it.y && pt.y <= it.y + it.h) return it; }
     else {
       const r = Math.max(14, it.size), p = it.pts;
       if (p.length === 1 ? Math.hypot(p[0].x - pt.x, p[0].y - pt.y) < r : p.some((q, k) => k && segDist(pt.x, pt.y, p[k-1], q) < r)) return it;
     }
   }
-  return null;
+  return lockedHit;
 }
 function tfItem(it, a, dx, dy, s){
   const X = v => a.x + (v - a.x) * s + dx, Y = v => a.y + (v - a.y) * s + dy;
-  if (it.type === 'image') return { ...it, x: X(it.x), y: Y(it.y), w: it.w * s, h: it.h * s, locked: false };
+  if (it.type === 'image') return { ...it, x: X(it.x), y: Y(it.y), w: it.w * s, h: it.h * s };
   return { ...it, size: it.size * s, pts: it.pts.map(p => ({ x: X(p.x), y: Y(p.y), p: p.p })) };
 }
 
@@ -543,6 +551,9 @@ const fsReq = docEl.requestFullscreen || docEl.webkitRequestFullscreen;
 const fsCur = () => document.fullscreenElement || document.webkitFullscreenElement;
 const standalone = navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
 if (!fsReq || standalone) $('fsBtn').classList.add('hide');
+function syncFs(){ document.documentElement.classList.toggle('fs', !!fsCur()); fit(); }
+document.addEventListener('fullscreenchange', syncFs);
+document.addEventListener('webkitfullscreenchange', syncFs);
 $('fsBtn').onclick = async () => {
   try {
     if (fsCur()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
@@ -632,7 +643,13 @@ async function importImage(f){
 async function importPdf(f){
   if (!window.pdfjsLib){ toast('PDFの読み込み機能を準備できませんでした'); return; }
   const data = new Uint8Array(await f.arrayBuffer());
-  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  const pdf = await pdfjsLib.getDocument({
+    data,
+    cMapUrl: PDFJS + 'cmaps/', cMapPacked: true,            // 日本語などのフォント表
+    standardFontDataUrl: PDFJS + 'standard_fonts/',
+    useSystemFonts: true,
+  }).promise;
   const insertAt = page().items.length ? cur + 1 : cur;
   const newPages = [];
   for (let n = 1; n <= pdf.numPages; n++){
@@ -798,6 +815,23 @@ const QUALITY = {
 };
 try { const q = localStorage.getItem('bansho-quality'); if (q && QUALITY[q]) $('quality').value = q; } catch (e){}
 $('quality').onchange = () => { try { localStorage.setItem('bansho-quality', $('quality').value); } catch (e){} };
+try { const g = localStorage.getItem('bansho-gain'); if (g && [...$('gainSel').options].some(o => o.value === g)) $('gainSel').value = g; } catch (e){}
+$('gainSel').onchange = () => { try { localStorage.setItem('bansho-gain', $('gainSel').value); } catch (e){} };
+let audioCtx = null, micNode = null;
+// マイクの音を増幅し、割れないようにリミッターをかけてから録音に回す
+function boostMic(stream, gainValue){
+  try {
+    if (!audioCtx) return stream.getAudioTracks();
+    const src = audioCtx.createMediaStreamSource(stream);
+    const g = audioCtx.createGain(); g.gain.value = gainValue;
+    const lim = audioCtx.createDynamicsCompressor();
+    lim.threshold.value = -12; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25;
+    const dest = audioCtx.createMediaStreamDestination();
+    src.connect(g); g.connect(lim); lim.connect(dest);
+    micNode = src;
+    return dest.stream.getAudioTracks();
+  } catch (e){ return stream.getAudioTracks(); }
+}
 function fmt(ms){ const s = Math.floor(ms / 1000); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
 function totalMs(){ return segs.reduce((a, s) => a + s.dur, 0) + (take ? performance.now() - take.t0 : 0); }
 function tick(){ $('recTime').textContent = fmt(totalMs()); }
@@ -820,6 +854,7 @@ function setRecUI(){
   $('recBtn').disabled = st === 'starting' || st === 'busy';
   $('quality').disabled = $('ratioBtn').disabled = st !== 'idle';
   $('quality').classList.toggle('hide', st !== 'idle');
+  $('gainSel').classList.toggle('hide', st !== 'idle');
   $('recTime').style.color = st === 'paused' ? 'var(--muted)' : '';
 }
 
@@ -859,6 +894,8 @@ $('rewindBtn').onclick = () => armConfirm($('rewindBtn'), 'もう一度押すと
 async function startRec(){
   if (!window.MediaRecorder || !cv.captureStream){ toast('このブラウザでは録画できません。iPadOSとSafariを最新にしてください', 4000); return; }
   recState = 'starting'; setRecUI();
+  // 音の処理はボタンを押した直後に準備しないと、Safariで音が止まったままになる
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch (e){ audioCtx = null; }
   micStream = null;
   let micMsg = '';
   let framed = false; try { framed = window.self !== window.top; } catch (e){ framed = true; }
@@ -866,7 +903,7 @@ async function startRec(){
     micMsg = framed ? 'Claudeの画面内ではマイクを使えません' : 'https で始まるURLで開いていないため、マイクを使えません';
   } else {
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     } catch (e){
       const n = e && e.name;
       micMsg = n === 'NotAllowedError' ? (framed ? 'Claudeの画面内ではマイクを使えません' : 'マイクが許可されていません。「ぁあ」→ Webサイトの設定 → マイク を確認してください')
@@ -893,7 +930,7 @@ async function startRec(){
     vs = recCanvas.captureStream(Q.fps); recTrack = null;
   }
   recFps = Q.fps; lastFrameT = 0;
-  recStream = new MediaStream([...vs.getVideoTracks(), ...(micStream ? micStream.getAudioTracks() : [])]);
+  recStream = new MediaStream([...vs.getVideoTracks(), ...(micStream ? boostMic(micStream, +$('gainSel').value || 1) : [])]);
   const mime = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
   recMime = mime; recExt = /webm/.test(mime) ? 'webm' : 'mp4';
   recOpts = mime ? { mimeType: mime, videoBitsPerSecond: Q.vbr, audioBitsPerSecond: 128000 } : {};
@@ -907,6 +944,7 @@ function teardownRec(){
   if (micStream) micStream.getTracks().forEach(t => t.stop());
   if (recStream) recStream.getTracks().forEach(t => t.stop());
   micStream = recStream = null;
+  if (micNode){ try { micNode.disconnect(); } catch (e){} micNode = null; }
   if (recCanvas) recCanvas.remove(); recCanvas = null; rctx = null; recTrack = null;
   clearInterval(timerId); timerId = null;
 }
