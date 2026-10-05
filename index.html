@@ -32,7 +32,7 @@ body{height:100%;margin:0;background:var(--chrome);color:var(--ink);
   font-family:"Zen Kaku Gothic New","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overflow:hidden}
 #app{height:100%;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto 1fr}
-header{grid-column:1/3;display:flex;align-items:center;gap:5px;padding:8px 8px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header{grid-column:1/3;display:flex;align-items:center;gap:5px;padding:4px 8px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .grp{display:flex;align-items:center;gap:4px}
 #pauseBtn.resume{background:var(--on);color:var(--onInk);border-color:var(--on)}
 #pauseBtn.resume svg{fill:currentColor}
@@ -40,7 +40,7 @@ header{grid-column:1/3;display:flex;align-items:center;gap:5px;padding:8px 8px;b
 html.fs header{padding-left:76px}
 .sep{flex:1}
 button{font:inherit;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:10px;
-  min-width:44px;height:44px;padding:0 8px;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-width:42px;height:42px;padding:0 8px;display:inline-flex;align-items:center;justify-content:center;gap:6px;
   touch-action:manipulation;cursor:pointer}
 button:disabled{opacity:.35}
 button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
@@ -51,7 +51,7 @@ button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8
 #recBtn.live .dot{border-radius:2px}
 select{font:inherit;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:10px;height:44px;padding:0 10px}
 select:disabled{opacity:.4}
-.iconSel{position:relative;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border:1px solid var(--line);border-radius:10px;background:var(--btn);color:var(--ink)}
+.iconSel{position:relative;display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border:1px solid var(--line);border-radius:10px;background:var(--btn);color:var(--ink)}
 .iconSel svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .iconSel select{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:16px}
 button.danger{background:var(--rec);color:#fff;border-color:transparent;font-weight:700}
@@ -72,8 +72,9 @@ aside hr{border:0;border-top:1px solid var(--line);margin:4px 2px;width:auto}
 .size b{font-size:12px;font-weight:500}
 .emode{justify-content:center;padding-left:0}
 .size[aria-pressed="true"]{border:2px solid var(--ink)}
-main{position:relative;background:var(--wall);display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;padding:6px}
-#board{display:block;background:#fff;border-radius:6px;box-shadow:0 0 0 4px var(--frame),0 6px 18px rgba(0,0,0,.18);touch-action:none}
+main{position:relative;background:var(--wall);display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;padding:3px}
+#board{display:block;background:#fff;border-radius:6px;box-shadow:0 0 0 2px var(--frame),0 3px 10px rgba(0,0,0,.15);touch-action:none}
+#zoomBtn{position:absolute;right:16px;bottom:16px;background:var(--on);color:var(--onInk);border-color:var(--on);font-weight:700;box-shadow:0 4px 12px rgba(0,0,0,.2)}
 #countdown{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:120px;font-weight:700;color:#fff;
   background:rgba(20,28,36,.45);pointer-events:none}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--chrome);
@@ -170,6 +171,7 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
   <main id="stage">
     <canvas id="board"></canvas>
     <div id="countdown"></div>
+    <button id="zoomBtn" class="hide" aria-label="全体表示に戻す"></button>
   </main>
 </div>
 
@@ -224,7 +226,7 @@ const layer = document.createElement('canvas'); layer.width = W; layer.height = 
 const lctx = layer.getContext('2d');
 function fit(){
   const r = stage.getBoundingClientRect();
-  const s = Math.min((r.width - 20) / VW, (r.height - 20) / H);
+  const s = Math.min((r.width - 10) / VW, (r.height - 10) / H);
   cv.style.width = Math.floor(VW * s) + 'px';
   cv.style.height = Math.floor(H * s) + 'px';
   const S = Math.max(1, Math.min(2, Math.round(VW * s * (window.devicePixelRatio || 1)) / VW));
@@ -236,9 +238,16 @@ function fit(){
     layerDirty = needsRender = true;
   }
 }
-function applyT(c){ c.setTransform(SCALE, 0, 0, SCALE, -X0 * SCALE, 0); }
+let Z = 1, PX = 0, PY = 0;   // 表示の拡大率と、表示している範囲の左上（ボード座標）
+function applyT(c){ const k = SCALE * Z; c.setTransform(k, 0, 0, k, -(X0 + PX) * k, -PY * k); }
+function clampView(){ PX = Math.max(0, Math.min(VW - VW / Z, PX)); PY = Math.max(0, Math.min(H - H / Z, PY)); }
+function setView(z, px, py){
+  Z = Math.max(1, Math.min(5, z)); PX = px; PY = py; clampView();
+  applyT(ctx); applyT(lctx); layerDirty = needsRender = true;
+  const b = $('zoomBtn'); b.classList.toggle('hide', Z <= 1.01); b.textContent = '×' + Z.toFixed(1) + '  全体表示';
+}
 function setRatio(r){
-  VW = r === '4:3' ? 1440 : 1920; X0 = (W - VW) / 2;
+  VW = r === '4:3' ? 1440 : 1920; X0 = (W - VW) / 2; Z = 1; PX = PY = 0; $('zoomBtn').classList.add('hide');
   $('ratioBtn').textContent = r === '4:3' ? '4:3' : '16:9';
   fit(); applyT(ctx); applyT(lctx); layerDirty = needsRender = true;
 }
@@ -318,71 +327,87 @@ function drawItem(c, it){
   if (it.type === 'image'){ const im = getImg(it.src); if (im.complete && im.naturalWidth) c.drawImage(im, it.x, it.y, it.w, it.h); }
   else drawStroke(c, it);
 }
-function renderLayer(){
-  lctx.globalCompositeOperation = 'source-over'; lctx.globalAlpha = 1;
-  lctx.fillStyle = BOARD_BG(); lctx.fillRect(0, 0, W, H);
-  if (grid) drawGrid(lctx);
+function renderItems(c){
+  c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+  c.fillStyle = BOARD_BG(); c.fillRect(0, 0, W, H);
+  if (grid) drawGrid(c);
   const hidden = drag ? new Set(sel) : null;
-  for (const it of page().items){ if (!hidden || !hidden.has(it)) drawItem(lctx, it); }
-  layerDirty = false;
+  for (const it of page().items){ if (!hidden || !hidden.has(it)) drawItem(c, it); }
 }
-function render(){
-  if (layerDirty) renderLayer();
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0); applyT(ctx);
-  if (drawing) drawStroke(ctx, drawing);
+function renderLayer(){ renderItems(lctx); layerDirty = false; recDirty = true; }
+// 書いている途中の線・動かしている途中のもの・レーザーなど（display=true のときは画面専用の補助表示も）
+function drawOverlays(c, display){
+  if (drawing) drawStroke(c, drawing);
   if (tool === 'move'){
     const accent = dark ? '#7db3ff' : '#1f5fbf';
     if (drag){
-      ctx.save(); ctx.translate(drag.a.x + drag.dx, drag.a.y + drag.dy); ctx.scale(drag.s, drag.s); ctx.translate(-drag.a.x, -drag.a.y);
-      for (const it of sel) drawItem(ctx, it);
-      ctx.restore();
+      c.save(); c.translate(drag.a.x + drag.dx, drag.a.y + drag.dy); c.scale(drag.s, drag.s); c.translate(-drag.a.x, -drag.a.y);
+      for (const it of sel) drawItem(c, it);
+      c.restore();
     }
-    if (sel.length){
-      const b = selBox();
-      ctx.save(); ctx.strokeStyle = accent; ctx.lineWidth = 2.5; ctx.setLineDash([12, 8]);
-      ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.setLineDash([]);
-      ctx.fillStyle = accent; ctx.fillRect(b.x + b.w - 16, b.y + b.h - 16, 32, 32); ctx.restore();
+    if (display && sel.length){
+      const b = selBox(), hs = 32 / Z;
+      c.save(); c.strokeStyle = accent; c.lineWidth = 2.5 / Z; c.setLineDash([12 / Z, 8 / Z]);
+      c.strokeRect(b.x, b.y, b.w, b.h); c.setLineDash([]);
+      c.fillStyle = accent; c.fillRect(b.x + b.w - hs / 2, b.y + b.h - hs / 2, hs, hs); c.restore();
     }
-    if (lasso && lasso.length > 1){
+    if (display && lasso && lasso.length > 1){
       const r = rectOf(lasso);
-      ctx.save(); ctx.fillStyle = dark ? 'rgba(125,179,255,.12)' : 'rgba(31,95,191,.08)'; ctx.fillRect(r.x, r.y, r.w, r.h); ctx.restore();
-      ctx.save(); ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
-      const r2 = rectOf(lasso); ctx.strokeRect(r2.x, r2.y, r2.w, r2.h); ctx.restore();
+      c.save(); c.fillStyle = dark ? 'rgba(125,179,255,.12)' : 'rgba(31,95,191,.08)'; c.fillRect(r.x, r.y, r.w, r.h);
+      c.strokeStyle = accent; c.lineWidth = 2 / Z; c.setLineDash([8 / Z, 6 / Z]); c.strokeRect(r.x, r.y, r.w, r.h); c.restore();
     }
   }
-  if (!erasing && hoverPt && tool === 'eraser'){
-    ctx.save(); ctx.strokeStyle = dark ? 'rgba(255,255,255,.45)' : 'rgba(30,43,55,.4)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(hoverPt.x, hoverPt.y, eraseR(), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  if (display && !erasing && hoverPt && tool === 'eraser'){
+    c.save(); c.strokeStyle = dark ? 'rgba(255,255,255,.45)' : 'rgba(30,43,55,.4)'; c.lineWidth = 1.5 / Z;
+    c.beginPath(); c.arc(hoverPt.x, hoverPt.y, eraseR(), 0, Math.PI * 2); c.stroke(); c.restore();
   }
-  if (erasing && erasing.pt){
-    ctx.save(); ctx.strokeStyle = dark ? 'rgba(255,255,255,.6)' : 'rgba(30,43,55,.55)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(erasing.pt.x, erasing.pt.y, eraseR(), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  if (display && erasing && erasing.pt){
+    c.save(); c.strokeStyle = dark ? 'rgba(255,255,255,.6)' : 'rgba(30,43,55,.55)'; c.lineWidth = 2 / Z;
+    c.beginPath(); c.arc(erasing.pt.x, erasing.pt.y, eraseR(), 0, Math.PI * 2); c.stroke(); c.restore();
   }
   const now = performance.now();
-  laser = laser.filter(l => now - l.t < 700);
   if (laser.length){
-    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
     for (let i = 1; i < laser.length; i++){
       const a = laser[i-1], b = laser[i]; if (b.t - a.t > 120) continue;
-      const k = 1 - (now - b.t) / 700;
-      ctx.strokeStyle = `rgba(255,40,40,${0.25 * k})`; ctx.lineWidth = 22 * k;
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      ctx.strokeStyle = `rgba(255,30,30,${0.85 * k})`; ctx.lineWidth = 7 * k;
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      const k = Math.max(0, 1 - (now - b.t) / 700);
+      c.strokeStyle = `rgba(255,40,40,${0.25 * k})`; c.lineWidth = 22 * k;
+      c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
+      c.strokeStyle = `rgba(255,30,30,${0.85 * k})`; c.lineWidth = 7 * k;
+      c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
     }
     const h = laser[laser.length-1];
     if (now - h.t < 700 && laserDown){
-      ctx.fillStyle = 'rgba(255,40,40,.3)'; ctx.beginPath(); ctx.arc(h.x, h.y, 20, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ff2a2a'; ctx.beginPath(); ctx.arc(h.x, h.y, 8, 0, Math.PI * 2); ctx.fill();
+      c.fillStyle = 'rgba(255,40,40,.3)'; c.beginPath(); c.arc(h.x, h.y, 20, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#ff2a2a'; c.beginPath(); c.arc(h.x, h.y, 8, 0, Math.PI * 2); c.fill();
     }
-    ctx.restore();
+    c.restore();
   }
+}
+function render(){
+  const now = performance.now();
+  laser = laser.filter(l => now - l.t < 700);
+  if (layerDirty) renderLayer();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0); applyT(ctx);
+  drawOverlays(ctx, true);
+}
+// 録画は拡大表示に関係なく、常にボード全体を撮る
+let recLayer = null, recLctx = null, recDirty = true;
+function renderRec(){
+  const k = recCanvas.width / VW, T = c => c.setTransform(k, 0, 0, k, -X0 * k, 0);
+  if (!recLayer || recLayer.width !== recCanvas.width || recLayer.height !== recCanvas.height){
+    recLayer = document.createElement('canvas'); recLayer.width = recCanvas.width; recLayer.height = recCanvas.height;
+    recLctx = recLayer.getContext('2d'); recDirty = true;
+  }
+  if (recDirty){ T(recLctx); renderItems(recLctx); recDirty = false; }
+  rctx.setTransform(1, 0, 0, 1, 0, 0); rctx.drawImage(recLayer, 0, 0); T(rctx);
+  drawOverlays(rctx, false);
 }
 let laserDown = false;
 function loop(){
   if (needsRender || laser.length || recState === 'live'){ render(); needsRender = false; }
   if (recCanvas && recState !== 'idle'){
-    rctx.drawImage(cv, 0, 0, recCanvas.width, recCanvas.height);
+    renderRec();
     const t = performance.now();
     if (recTrack && t - lastFrameT >= 1000 / recFps - 4){ recTrack.requestFrame(); lastFrameT = t; }
   }
@@ -399,10 +424,13 @@ function redo(){ const pg = page(); if (!pg.redo.length) return; pg.undo.push(pg
 const ERASE_SIZES = { 2.5: 7, 4.5: 14, 8: 30 };
 let eraseKey = 4.5, eraseMode = 'part', hoverPt = null;
 const eraseR = () => ERASE_SIZES[eraseKey] || 14;
-function toBoard(e){
+function boardAt(cx, cy){
   const r = cv.getBoundingClientRect();
-  return { x: X0 + (e.clientX - r.left) * VW / r.width, y: (e.clientY - r.top) * H / r.height,
-           p: e.pointerType === 'pen' ? Math.max(0.05, e.pressure || 0.5) : 0.5 };
+  return { x: X0 + PX + (cx - r.left) * VW / (Z * r.width), y: PY + (cy - r.top) * H / (Z * r.height) };
+}
+function toBoard(e){
+  const b = boardAt(e.clientX, e.clientY);
+  return { x: b.x, y: b.y, p: e.pointerType === 'pen' ? Math.max(0.05, e.pressure || 0.5) : 0.5 };
 }
 function segDist(px, py, a, b){
   const dx = b.x - a.x, dy = b.y - a.y, L = dx*dx + dy*dy;
@@ -495,12 +523,34 @@ function tfItem(it, a, dx, dy, s){
   return { ...it, size: it.size * s, pts: it.pts.map(p => ({ x: X(p.x), y: Y(p.y), p: p.p })) };
 }
 
+const touches = new Map(); let pinch = null;
+function cancelAction(){
+  if (drawing) drawing = null;
+  if (erasing){ const pg = page(); if (erasing.hit) pg.items = pg.undo.pop(); else pg.undo.pop(); erasing = null; layerDirty = true; }
+  if (drag){ drag = null; layerDirty = true; }
+  lasso = null; laserDown = false; activeId = null; needsRender = true;
+}
+function pinchInfo(){
+  const [a, b] = [...touches.values()];
+  return { d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+}
 cv.addEventListener('pointerdown', e => {
+  // 指2本：拡大・縮小と移動（書いている途中だったら取り消す）
+  if (e.pointerType === 'touch'){
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2){
+      e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (_){}
+      if (activeId !== null) cancelAction();
+      const pi = pinchInfo(); pinch = { d0: pi.d, z0: Z, bp: boardAt(pi.mx, pi.my) };
+      return;
+    }
+    if (pinch || touches.size > 2) return;
+  }
   if (e.pointerType === 'pen') penSeen = true;
   if (penSeen && e.pointerType === 'touch' && tool !== 'laser' && tool !== 'move') return; // palm rejection
   if (activeId !== null) return;
   e.preventDefault();
-  activeId = e.pointerId; cv.setPointerCapture(e.pointerId);
+  activeId = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (_){}
   const pt = toBoard(e);
   if (tool === 'pen' || tool === 'hl'){
     drawing = { type: 'stroke', color: tool === 'hl' ? hlColor : penColor, size: tool === 'hl' ? ({2.5:14,4.5:24,8:38}[size] || 24) : size, hl: tool === 'hl', pts: [pt] };
@@ -526,6 +576,15 @@ cv.addEventListener('pointerdown', e => {
 
 
 cv.addEventListener('pointermove', e => {
+  if (e.pointerType === 'touch' && touches.has(e.pointerId)){
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && touches.size >= 2){
+      const pi = pinchInfo(), r = cv.getBoundingClientRect();
+      const z = Math.max(1, Math.min(5, pinch.z0 * pi.d / pinch.d0));
+      setView(z, pinch.bp.x - X0 - (pi.mx - r.left) * VW / (z * r.width), pinch.bp.y - (pi.my - r.top) * H / (z * r.height));
+      return;
+    }
+  }
   if (activeId === null && tool === 'eraser' && e.pointerType !== 'touch'){ hoverPt = toBoard(e); needsRender = true; }
   if (e.pointerId !== activeId) return;
   const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
@@ -542,6 +601,7 @@ cv.addEventListener('pointermove', e => {
   needsRender = true;
 });
 function endPointer(e){
+  if (e.pointerType === 'touch'){ touches.delete(e.pointerId); if (pinch){ if (touches.size < 2) pinch = null; return; } }
   if (e.pointerId !== activeId) return;
   activeId = null;
   if (drawing){ snapshot(); page().items.push(drawing); drawing = null; changed(); }
@@ -573,6 +633,8 @@ cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointerleave', () => { if (hoverPt){ hoverPt = null; needsRender = true; } });
 cv.addEventListener('pointercancel', endPointer);
 stage.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+document.addEventListener('gesturestart', e => e.preventDefault());
+$('zoomBtn').onclick = () => setView(1, 0, 0);
 
 /* ---------- toolbar ---------- */
 document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => {
@@ -1225,7 +1287,7 @@ async function startRec(){
   recCanvas.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
   document.body.appendChild(recCanvas);
   rctx = recCanvas.getContext('2d'); rctx.imageSmoothingQuality = 'high';
-  rctx.drawImage(cv, 0, 0, recCanvas.width, recCanvas.height);
+  recDirty = true; renderRec();
   let vs = recCanvas.captureStream(0);
   recTrack = vs.getVideoTracks()[0] || null;
   if (!recTrack || typeof recTrack.requestFrame !== 'function'){
