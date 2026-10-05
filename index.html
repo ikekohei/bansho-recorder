@@ -31,13 +31,15 @@ body{height:100%;margin:0;background:var(--chrome);color:var(--ink);
   font-family:"Zen Kaku Gothic New","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overflow:hidden}
 #app{height:100%;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto 1fr}
-header{grid-column:1/3;display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header{grid-column:1/3;display:flex;align-items:center;gap:5px;padding:8px 8px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .grp{display:flex;align-items:center;gap:4px}
+#pauseBtn.resume{background:var(--on);color:var(--onInk);border-color:var(--on)}
+#pauseBtn.resume svg{fill:currentColor}
 /* 全画面時は左上にSafariの✕ボタンが重なるので、その分あける */
-html.fs header{padding-left:84px}
+html.fs header{padding-left:76px}
 .sep{flex:1}
 button{font:inherit;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:10px;
-  min-width:44px;height:44px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-width:44px;height:44px;padding:0 8px;display:inline-flex;align-items:center;justify-content:center;gap:6px;
   touch-action:manipulation;cursor:pointer}
 button:disabled{opacity:.35}
 button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
@@ -48,7 +50,13 @@ button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8
 #recBtn.live .dot{border-radius:2px}
 select{font:inherit;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:10px;height:44px;padding:0 10px}
 select:disabled{opacity:.4}
+.iconSel{position:relative;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border:1px solid var(--line);border-radius:10px;background:var(--btn);color:var(--ink)}
+.iconSel svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.iconSel select{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:16px}
 button.danger{background:var(--rec);color:#fff;border-color:transparent;font-weight:700}
+#rewindBtn{color:var(--rec);border-color:var(--rec);font-weight:700}
+#rewindBtn svg{fill:currentColor}
+#rewindBtn:disabled{opacity:.35}
 #recTime{font-variant-numeric:tabular-nums;font-weight:700;min-width:52px;color:var(--rec)}
 aside{display:flex;flex-direction:column;gap:6px;padding:10px 8px;border-right:1px solid var(--line);overflow-y:auto}
 aside .tool{flex-direction:column;height:58px;width:60px;gap:2px;font-size:11px;padding:0}
@@ -88,36 +96,38 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
       <button id="prevBtn" aria-label="前のページ"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
       <span id="pageLabel">1 / 1</span>
       <button id="nextBtn" aria-label="次のページ"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
-      <button id="addBtn" aria-label="ページを追加"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-      <button id="delPageBtn" aria-label="このページを削除"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
+      <button id="addBtn" aria-label="ページを追加" title="ページを追加"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14h6"/></svg></button>
+      <button id="delPageBtn" aria-label="このページを削除" title="このページを削除"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/><path d="M9.5 12.5l5 5M14.5 12.5l-5 5"/></svg></button>
     </div>
     <div class="grp">
       <button id="undoBtn" aria-label="元に戻す"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
       <button id="redoBtn" aria-label="やり直す"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></svg></button>
-      <button id="clearBtn">全消し</button>
+      <button id="clearBtn" aria-label="手書きを全消し" title="手書きを全消し（PDF・画像は残す）"><svg viewBox="0 0 24 24"><path d="M3 15c2-4 4-4 5 0s3 4 5 0"/><path d="M15 4l6 6M21 4l-6 6"/></svg></button>
     </div>
     <div class="grp">
-      <button id="gridBtn" class="toggle" aria-pressed="false">方眼</button>
-      <button id="darkBtn" class="toggle" aria-pressed="false">黒板</button>
+      <button id="gridBtn" class="toggle" aria-pressed="false" aria-label="方眼" title="方眼"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/></svg></button>
+      <button id="darkBtn" class="toggle" aria-pressed="false" aria-label="黒板" title="黒板"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="1.5" style="fill:currentColor;fill-opacity:.85"/><path d="M8 21l2-4M16 21l-2-4"/></svg></button>
       <button id="ratioBtn" aria-label="ボードの縦横比">4:3</button>
-      <button id="importBtn"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 16l5-5 4 4 3-3 4 4"/></svg>PDF・画像</button>
+      <button id="importBtn" aria-label="PDF・画像を読み込む" title="PDF・画像を読み込む"><svg viewBox="0 0 24 24"><path d="M12 3v11M7.5 9.5L12 14l4.5-4.5"/><path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3"/></svg></button>
       <input id="file" type="file" accept="image/*,application/pdf" multiple class="hide">
     </div>
     <div class="sep"></div>
     <div class="grp">
-      <select id="gainSel" aria-label="録音の音量" title="録音の音量">
-        <option value="1">音量 標準</option>
-        <option value="2.5" selected>音量 大</option>
-        <option value="4">音量 特大</option>
-      </select>
-      <select id="quality" aria-label="画質">
-        <option value="light">軽量</option>
-        <option value="std" selected>標準</option>
-        <option value="high">高画質</option>
-      </select>
+      <label class="iconSel" id="gainWrap" title="録音の音量"><span id="gainIcon"></span>
+        <select id="gainSel" aria-label="録音の音量">
+          <option value="1">音量：標準</option>
+          <option value="2.5" selected>音量：大</option>
+          <option value="4">音量：特大</option>
+        </select></label>
+      <label class="iconSel" id="qualityWrap" title="画質"><span id="qualityIcon"></span>
+        <select id="quality" aria-label="画質">
+          <option value="light">画質：軽量（5分≒10MB）</option>
+          <option value="std" selected>画質：標準（5分≒18MB）</option>
+          <option value="high">画質：高画質（5分≒60MB）</option>
+        </select></label>
       <span id="recTime" class="hide">00:00</span>
-      <button id="rewindBtn" class="hide"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-4"/></svg>戻る</button>
-      <button id="pauseBtn" class="hide" ><svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>一時停止</button>
+      <button id="rewindBtn" class="hide" title="一時停止したところまで動画を戻して撮り直す"><svg viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M18 5l-9 7 9 7z"/></svg>撮り直し</button>
+      <button id="pauseBtn" class="hide" aria-label="一時停止" title="一時停止"><svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg></button>
       <button id="recBtn"><span class="dot"></span><span id="recLabel">録画</span></button>
       <button id="fsBtn" aria-label="全画面"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     </div>
@@ -333,8 +343,10 @@ function render(){
       ctx.fillStyle = accent; ctx.fillRect(b.x + b.w - 16, b.y + b.h - 16, 32, 32); ctx.restore();
     }
     if (lasso && lasso.length > 1){
+      const r = rectOf(lasso);
+      ctx.save(); ctx.fillStyle = dark ? 'rgba(125,179,255,.12)' : 'rgba(31,95,191,.08)'; ctx.fillRect(r.x, r.y, r.w, r.h); ctx.restore();
       ctx.save(); ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
-      ctx.beginPath(); ctx.moveTo(lasso[0].x, lasso[0].y); for (const q of lasso) ctx.lineTo(q.x, q.y); ctx.closePath(); ctx.stroke(); ctx.restore();
+      const r2 = rectOf(lasso); ctx.strokeRect(r2.x, r2.y, r2.w, r2.h); ctx.restore();
     }
   }
   if (!erasing && hoverPt && tool === 'eraser'){
@@ -451,11 +463,15 @@ function pip(pt, poly){
   }
   return inside;
 }
-function lassoSelect(poly){
+function rectOf(l){ const a = l[0], b = l[l.length - 1]; return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) }; }
+// 長方形で囲んで選ぶ：線は半分以上が中に入っていれば、画像は少しでも重なれば選ぶ
+// （PDFのページは板書だけ選びたいときの邪魔になるので、囲みでは選ばない。タップで選ぶ）
+function lassoSelect(l){
+  const r = rectOf(l), inR = q => q.x >= r.x && q.x <= r.x + r.w && q.y >= r.y && q.y <= r.y + r.h;
   return page().items.filter(it => {
     if (it.locked) return false;
-    if (it.type === 'image') return pip({ x: it.x + it.w / 2, y: it.y + it.h / 2 }, poly);
-    let k = 0; for (const p of it.pts) if (pip(p, poly)) k++;
+    if (it.type === 'image') return it.x < r.x + r.w && it.x + it.w > r.x && it.y < r.y + r.h && it.y + it.h > r.y;
+    let k = 0; for (const p of it.pts) if (inR(p)) k++;
     return k >= it.pts.length * 0.5;
   });
 }
@@ -521,7 +537,7 @@ cv.addEventListener('pointermove', e => {
     else { drag.s = Math.max(0.1, (pt.x - drag.a.x + pt.y - drag.a.y) / (drag.bw + drag.bh)); }
     if (Math.abs(drag.dx) + Math.abs(drag.dy) > 2 || Math.abs(drag.s - 1) > 0.01) drag.moved = true;
   }
-  else if (lasso){ const pt = toBoard(e); const L = lasso[lasso.length-1]; if (Math.hypot(pt.x - L.x, pt.y - L.y) > 3) lasso.push(pt); }
+  else if (lasso){ lasso = [lasso[0], toBoard(e)]; }
   needsRender = true;
 });
 function endPointer(e){
@@ -536,11 +552,17 @@ function endPointer(e){
       const set = new Set(sel), out = [];
       page().items = page().items.map(it => { if (!set.has(it)) return it; const t = tfItem(it, d.a, d.dx, d.dy, d.s); out.push(t); return t; });
       sel = out; changed();
-    } else layerDirty = true;
+    } else {
+      // 動かさずに離した＝タップ：下にある別のものを選び直す。同じものをもう一度タップしたら選択を外す
+      const it = hitAt({ x: d.sx, y: d.sy });
+      if (it && !sel.includes(it)) sel = [it];
+      else if (!it || (sel.length === 1 && sel[0] === it)) sel = [];
+      layerDirty = true; updateUI();
+    }
   }
   else if (lasso){
-    let len = 0; for (let i = 1; i < lasso.length; i++) len += Math.hypot(lasso[i].x - lasso[i-1].x, lasso[i].y - lasso[i-1].y);
-    if (len < 15){ const it = hitAt(lasso[0]); sel = it ? [it] : []; }
+    const rr = rectOf(lasso);
+    if (rr.w < 12 && rr.h < 12){ const it = hitAt(lasso[0]); sel = it ? [it] : []; }
     else sel = lassoSelect(lasso);
     lasso = null; updateUI();
   }
@@ -1080,9 +1102,21 @@ const QUALITY = {
   high:  { w: 1920, h: 1080, fps: 30, vbr: 1500000, abr: 128000 },
 };
 try { const q = localStorage.getItem('bansho-quality'); if (q && QUALITY[q]) $('quality').value = q; } catch (e){}
-$('quality').onchange = () => { try { localStorage.setItem('bansho-quality', $('quality').value); } catch (e){} };
+// 音量はスピーカーの波の数、画質は画面の中の棒の数で表す（1〜3）
+function drawSelIcons(){
+  const gi = { '1': 1, '2.5': 2, '4': 3 }[$('gainSel').value] || 2;
+  const waves = ['M15.5 9.5a3.5 3.5 0 010 5', 'M18 7a7 7 0 010 10', 'M20.5 4.5a10.5 10.5 0 010 15'].slice(0, gi).map(d => `<path d="${d}"/>`).join('');
+  $('gainIcon').innerHTML = `<svg viewBox="0 0 24 24"><path d="M4 9.5h3l4-3.5v12l-4-3.5H4z" style="fill:currentColor;fill-opacity:.15"/>${waves}</svg>`;
+  const qi = { light: 1, std: 2, high: 3 }[$('quality').value] || 2;
+  const bars = [0, 1, 2].map(k => `<rect x="${6.8 + k * 3.8}" y="${15.5 - (3 + k * 2.8)}" width="2.6" height="${3 + k * 2.8}" rx=".6" style="fill:currentColor;fill-opacity:${k < qi ? 1 : .18};stroke:none"/>`).join('');
+  $('qualityIcon').innerHTML = `<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="13" rx="2"/><path d="M9 21h6"/>${bars}</svg>`;
+  $('gainWrap').title = $('gainSel').selectedOptions[0].text;
+  $('qualityWrap').title = $('quality').selectedOptions[0].text;
+}
+$('quality').onchange = () => { try { localStorage.setItem('bansho-quality', $('quality').value); } catch (e){} drawSelIcons(); };
 try { const g = localStorage.getItem('bansho-gain'); if (g && [...$('gainSel').options].some(o => o.value === g)) $('gainSel').value = g; } catch (e){}
-$('gainSel').onchange = () => { try { localStorage.setItem('bansho-gain', $('gainSel').value); } catch (e){} };
+$('gainSel').onchange = () => { try { localStorage.setItem('bansho-gain', $('gainSel').value); } catch (e){} drawSelIcons(); };
+drawSelIcons();
 let audioCtx = null, micNode = null;
 // マイクの音を増幅し、割れないようにリミッターをかけてから録音に回す
 function boostMic(stream, gainValue){
@@ -1113,14 +1147,16 @@ function setRecUI(){
   $('recTime').classList.toggle('hide', !on);
   $('pauseBtn').classList.toggle('hide', !on);
   $('rewindBtn').classList.toggle('hide', !on);
-  $('pauseBtn').innerHTML = st === 'paused' ? PLAY_ICON + '再開' : PAUSE_ICON + '一時停止';
+  $('pauseBtn').innerHTML = st === 'paused' ? PLAY_ICON : PAUSE_ICON;
+  $('pauseBtn').title = $('pauseBtn').ariaLabel = st === 'paused' ? '再開' : '一時停止';
+  $('pauseBtn').classList.toggle('resume', st === 'paused');
   $('rewindBtn').disabled = st === 'busy' || (st === 'paused' && !segs.length);
   $('pauseBtn').disabled = st === 'busy';
   $('recBtn').classList.toggle('live', !!on); $('recLabel').textContent = on ? '停止' : '録画';
   $('recBtn').disabled = st === 'starting' || st === 'busy';
   $('quality').disabled = $('ratioBtn').disabled = st !== 'idle';
-  $('quality').classList.toggle('hide', st !== 'idle');
-  $('gainSel').classList.toggle('hide', st !== 'idle');
+  $('qualityWrap').classList.toggle('hide', st !== 'idle');
+  $('gainWrap').classList.toggle('hide', st !== 'idle');
   $('recTime').style.color = st === 'paused' ? 'var(--muted)' : '';
 }
 
@@ -1143,10 +1179,10 @@ async function finishTake(keep){
 
 $('recBtn').onclick = () => { if (recState === 'idle') startRec(); else if (recState === 'live' || recState === 'paused') stopRec(); };
 $('pauseBtn').onclick = async () => {
-  if (recState === 'live'){ recState = 'busy'; setRecUI(); await finishTake(true); recState = 'paused'; setRecUI(); toast('一時停止中。ミスしたら「戻る」でここまで戻れます'); }
+  if (recState === 'live'){ recState = 'busy'; setRecUI(); await finishTake(true); recState = 'paused'; setRecUI(); toast('一時停止中。ミスしたら「撮り直し」でここまで戻れます'); }
   else if (recState === 'paused'){ startTake(); }
 };
-$('rewindBtn').onclick = () => armConfirm($('rewindBtn'), 'もう一度押すと戻る', async () => {
+$('rewindBtn').onclick = () => armConfirm($('rewindBtn'), 'もう一度で撮り直し', async () => {
   if (recState === 'live'){
     const snap = take.startSnap; recState = 'busy'; setRecUI();
     await finishTake(false); restoreSnap(snap);
