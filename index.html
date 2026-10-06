@@ -183,7 +183,6 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
     <hr>
     <div id="selGroup" style="display:none;flex-direction:column;gap:6px">
       <button class="tool" id="copyBtn"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/></svg>コピー</button>
-      <button class="tool" id="cropBtn" title="囲んだ範囲の画像・PDFを切り抜いてコピー"><svg viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M2 6h14a2 2 0 012 2v14"/></svg>切り抜き</button>
       <button class="tool" id="cutBtn"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8 16L19 4M16 16L5 4"/></svg>切り取り</button>
       <button class="tool" id="pasteBtn"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 11h6M9 15h4"/></svg>貼り付け</button>
       <button class="tool" id="delSelBtn"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>削除</button>
@@ -608,7 +607,8 @@ cv.addEventListener('pointerdown', e => {
     if (pinch || touches.size > 2) return;
   }
   if (e.pointerType === 'pen') penSeen = true;
-  if (penSeen && e.pointerType === 'touch' && tool !== 'laser' && tool !== 'move') return; // palm rejection
+  // Pencilを使い始めたら、指1本の操作は無視する（手のひらが触れて選択が外れたり線が出たりしないように。指2本の拡大は別処理）
+  if (penSeen && e.pointerType === 'touch') return;
   if (activeId !== null) return;
   e.preventDefault();
   activeId = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (_){}
@@ -668,7 +668,8 @@ function endPointer(e){
   if (drawing){ snapshot(); page().items.push(drawing); drawing = null; changed(); }
   else if (erasing){ if (!erasing.hit) page().undo.pop(); else changed(); erasing = null; }
   else if (drag){
-    const d = drag; drag = null; lastRect = null;
+    const d = drag; drag = null;
+    if (d.moved) lastRect = null;   // 動かしたときだけ囲み範囲を消す（タップでは残す）
     if (d.moved){
       snapshot();
       const set = new Set(sel), out = [];
@@ -754,7 +755,7 @@ $('fsBtn').onclick = async () => {
   } catch (e){ toast('この画面では全画面にできません。Safariで「ホーム画面に追加」して開くと全画面で使えます', 5000); }
 };
 $('gridBtn').onclick = () => { grid = !grid; $('gridBtn').setAttribute('aria-pressed', grid); changed(); };
-function copySel(){ if (!sel.length) return false; clip = sel.slice(); clipPage = cur; pasteN = 0; return true; }
+function copyObjects(){ if (!sel.length) return false; clip = sel.slice(); clipPage = cur; pasteN = 0; return true; }
 function deleteSel(){ if (!sel.length) return; snapshot(); const set = new Set(sel); page().items = page().items.filter(i => !set.has(i)); sel = []; changed(); }
 function pasteClip(){
   if (!clip) return;
@@ -767,24 +768,39 @@ function pasteClip(){
   sel = copies; changed();
 }
 const rectImages = r => page().items.filter(it => it.type === 'image' && it.x < r.x + r.w && it.x + it.w > r.x && it.y < r.y + r.h && it.y + it.h > r.y);
-// 囲んだ範囲の画像・PDFだけを新しい画像として切り抜き、中の板書と一緒にコピーする（元はそのまま）
-async function cropToClip(){
-  const r = lastRect; if (!r) return;
-  const imgs = rectImages(r); if (!imgs.length){ toast('囲んだ範囲に画像やPDFがありません'); return; }
+// 長方形で囲んだ範囲から、はみ出した画像・PDFの部分だけを1枚の画像に切り出す
+function cropOf(r, imgs){
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const it of imgs){ x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); x1 = Math.max(x1, it.x + it.w); y1 = Math.max(y1, it.y + it.h); }
+  const q = { x: Math.max(r.x, x0), y: Math.max(r.y, y0) }; q.w = Math.min(r.x + r.w, x1) - q.x; q.h = Math.min(r.y + r.h, y1) - q.y;
+  if (q.w <= 1 || q.h <= 1) return null;
   let f = 1;
   for (const it of imgs){ const im = getImg(it.src); if (im.naturalWidth) f = Math.max(f, im.naturalWidth / it.w); }
   f = Math.min(3, f);
-  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(r.w * f)); c.height = Math.max(1, Math.round(r.h * f));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(q.w * f)); c.height = Math.max(1, Math.round(q.h * f));
   const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
-  g.setTransform(f, 0, 0, f, -r.x * f, -r.y * f);
+  g.setTransform(f, 0, 0, f, -q.x * f, -q.y * f);
   for (const it of imgs){ const im = getImg(it.src); if (im.complete && im.naturalWidth) g.drawImage(im, it.x, it.y, it.w, it.h); }
-  const crop = { type: 'image', src: c.toDataURL('image/jpeg', 0.9), x: r.x, y: r.y, w: r.w, h: r.h };
-  clip = [crop, ...sel.filter(it => it.type === 'stroke')]; clipPage = cur; pasteN = 0;
-  updateUI(); toast('切り抜いてコピーしました。移りたいページで「貼り付け」を押してください', 4000);
+  return { type: 'image', src: c.toDataURL('image/jpeg', 0.9), x: q.x, y: q.y, w: q.w, h: q.h };
 }
-$('cropBtn').onclick = cropToClip;
-$('copyBtn').onclick = () => { if (copySel()) { toast('コピーしました。別のページにも貼り付けられます'); updateUI(); } };
-$('cutBtn').onclick = () => { if (copySel()){ clipPage = -1; deleteSel(); toast('切り取りました'); } };
+// コピー：長方形で囲んだときは「囲んだ範囲に見えているもの」をコピーする
+//   線 → そのまま／範囲に収まった画像 → そのまま／はみ出した画像やPDF → 範囲の部分だけ切り出し
+// タップで選んだときは、選んだものを丸ごとコピーする
+function copySel(){
+  if (lastRect){
+    const r = lastRect, imgs = rectImages(r);
+    const inside = it => it.x >= r.x && it.y >= r.y && it.x + it.w <= r.x + r.w && it.y + it.h <= r.y + r.h;
+    const whole = imgs.filter(it => !it.locked && inside(it)), part = imgs.filter(it => !whole.includes(it));
+    const out = [];
+    const crop = part.length ? cropOf(r, part) : null; if (crop) out.push(crop);
+    out.push(...whole, ...sel.filter(it => it.type === 'stroke'));
+    if (!out.length) return false;
+    clip = out; clipPage = cur; pasteN = 0; return true;
+  }
+  return copyObjects();
+}
+$('copyBtn').onclick = () => { if (copySel()) { toast('コピーしました。別のページにも貼り付けられます'); updateUI(); } else toast('コピーするものがありません'); };
+$('cutBtn').onclick = () => { if (copyObjects()){ clipPage = -1; deleteSel(); toast('切り取りました'); } };
 $('pasteBtn').onclick = pasteClip;
 $('delSelBtn').onclick = deleteSel;
 function goTo(i){ cur = Math.max(0, Math.min(pages.length - 1, i)); sel = []; lastRect = null; changed(); }
@@ -806,7 +822,7 @@ function deletePage(){
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c'){ copySel(); updateUI(); }
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'x'){ if (copySel()){ clipPage = -1; deleteSel(); } }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'x'){ if (copyObjects()){ clipPage = -1; deleteSel(); } }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v'){ e.preventDefault(); pasteClip(); }
   if ((e.key === 'Delete' || e.key === 'Backspace') && sel.length){ e.preventDefault(); deleteSel(); }
   if (e.key === 'ArrowRight') goTo(cur + 1);
@@ -817,9 +833,9 @@ function updateUI(){
   $('prevBtn').disabled = cur === 0; $('nextBtn').disabled = cur === pages.length - 1;
   $('undoBtn').disabled = !page().undo.length; $('redoBtn').disabled = !page().redo.length;
   $('selGroup').style.display = tool === 'move' ? 'flex' : 'none';
-  $('copyBtn').disabled = $('cutBtn').disabled = $('delSelBtn').disabled = !sel.length;
+  $('cutBtn').disabled = $('delSelBtn').disabled = !sel.length;
+  $('copyBtn').disabled = !sel.length && !(lastRect && rectImages(lastRect).length);
   $('pasteBtn').disabled = !clip;
-  $('cropBtn').disabled = !(lastRect && rectImages(lastRect).length);
 }
 let toastT;
 function toast(msg, ms = 2600){ const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
