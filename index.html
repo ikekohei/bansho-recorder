@@ -183,6 +183,7 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
     <hr>
     <div id="selGroup" style="display:none;flex-direction:column;gap:6px">
       <button class="tool" id="copyBtn"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/></svg>コピー</button>
+      <button class="tool" id="cropBtn" title="囲んだ範囲の画像・PDFを切り抜いてコピー"><svg viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M2 6h14a2 2 0 012 2v14"/></svg>切り抜き</button>
       <button class="tool" id="cutBtn"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8 16L19 4M16 16L5 4"/></svg>切り取り</button>
       <button class="tool" id="pasteBtn"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 11h6M9 15h4"/></svg>貼り付け</button>
       <button class="tool" id="delSelBtn"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>削除</button>
@@ -245,8 +246,12 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
   </div>
 </dialog>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script type="module">
+// PDFの表示部品（pdf.js 4系・古めのiPadでも動く legacy 版）。3系では日本語フォントが崩れるPDFがあったため更新
+import * as lib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.min.mjs';
+lib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.worker.min.mjs';
+window.pdfjsLib = lib;
+</script>
 <script>
 (() => {
 const W = 1920, H = 1080;
@@ -263,6 +268,7 @@ let tool = 'pen', penColor = '#1a1a1a', hlColor = '#ffd400', size = 4.5;
 let penSeen = false;
 let drawing = null, activeId = null;
 let erasing = null;
+let lastRect = null;
 let sel = [], drag = null, lasso = null, clip = null, clipPage = -1, pasteN = 0;
 let laser = [];
 let needsRender = true, layerDirty = true;
@@ -399,6 +405,11 @@ function drawOverlays(c, display){
       c.save(); c.strokeStyle = accent; c.lineWidth = 2.5 / Z; c.setLineDash([12 / Z, 8 / Z]);
       c.strokeRect(b.x, b.y, b.w, b.h); c.setLineDash([]);
       c.fillStyle = accent; c.fillRect(b.x + b.w - hs / 2, b.y + b.h - hs / 2, hs, hs); c.restore();
+    }
+    if (display && lastRect && !lasso){
+      const r = lastRect;
+      c.save(); c.strokeStyle = dark ? 'rgba(255,255,255,.5)' : 'rgba(30,43,55,.45)'; c.lineWidth = 1.5 / Z; c.setLineDash([6 / Z, 5 / Z]);
+      c.strokeRect(r.x, r.y, r.w, r.h); c.restore();
     }
     if (display && lasso && lasso.length > 1){
       const r = rectOf(lasso);
@@ -657,7 +668,7 @@ function endPointer(e){
   if (drawing){ snapshot(); page().items.push(drawing); drawing = null; changed(); }
   else if (erasing){ if (!erasing.hit) page().undo.pop(); else changed(); erasing = null; }
   else if (drag){
-    const d = drag; drag = null;
+    const d = drag; drag = null; lastRect = null;
     if (d.moved){
       snapshot();
       const set = new Set(sel), out = [];
@@ -673,6 +684,7 @@ function endPointer(e){
   }
   else if (lasso){
     const rr = rectOf(lasso);
+    lastRect = (rr.w < 12 && rr.h < 12) ? null : rr;
     if (rr.w < 12 && rr.h < 12){ const it = hitAt(lasso[0]); sel = it ? [it] : []; }
     else sel = lassoSelect(lasso);
     lasso = null; updateUI();
@@ -688,7 +700,7 @@ $('zoomBtn').onclick = () => setView(1, 0, 0);
 
 /* ---------- toolbar ---------- */
 document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => {
-  tool = b.dataset.tool; if (tool !== 'move'){ sel = []; lasso = null; }
+  tool = b.dataset.tool; if (tool !== 'move'){ sel = []; lasso = null; lastRect = null; }
   document.querySelectorAll('[data-tool]').forEach(x => x.setAttribute('aria-pressed', x === b));
   syncColors(); updateUI(); needsRender = true;
 });
@@ -754,11 +766,28 @@ function pasteClip(){
   if (tool !== 'move') document.querySelector('[data-tool="move"]').click();
   sel = copies; changed();
 }
+const rectImages = r => page().items.filter(it => it.type === 'image' && it.x < r.x + r.w && it.x + it.w > r.x && it.y < r.y + r.h && it.y + it.h > r.y);
+// 囲んだ範囲の画像・PDFだけを新しい画像として切り抜き、中の板書と一緒にコピーする（元はそのまま）
+async function cropToClip(){
+  const r = lastRect; if (!r) return;
+  const imgs = rectImages(r); if (!imgs.length){ toast('囲んだ範囲に画像やPDFがありません'); return; }
+  let f = 1;
+  for (const it of imgs){ const im = getImg(it.src); if (im.naturalWidth) f = Math.max(f, im.naturalWidth / it.w); }
+  f = Math.min(3, f);
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(r.w * f)); c.height = Math.max(1, Math.round(r.h * f));
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  g.setTransform(f, 0, 0, f, -r.x * f, -r.y * f);
+  for (const it of imgs){ const im = getImg(it.src); if (im.complete && im.naturalWidth) g.drawImage(im, it.x, it.y, it.w, it.h); }
+  const crop = { type: 'image', src: c.toDataURL('image/jpeg', 0.9), x: r.x, y: r.y, w: r.w, h: r.h };
+  clip = [crop, ...sel.filter(it => it.type === 'stroke')]; clipPage = cur; pasteN = 0;
+  updateUI(); toast('切り抜いてコピーしました。移りたいページで「貼り付け」を押してください', 4000);
+}
+$('cropBtn').onclick = cropToClip;
 $('copyBtn').onclick = () => { if (copySel()) { toast('コピーしました。別のページにも貼り付けられます'); updateUI(); } };
 $('cutBtn').onclick = () => { if (copySel()){ clipPage = -1; deleteSel(); toast('切り取りました'); } };
 $('pasteBtn').onclick = pasteClip;
 $('delSelBtn').onclick = deleteSel;
-function goTo(i){ cur = Math.max(0, Math.min(pages.length - 1, i)); sel = []; changed(); }
+function goTo(i){ cur = Math.max(0, Math.min(pages.length - 1, i)); sel = []; lastRect = null; changed(); }
 $('prevBtn').onclick = () => goTo(cur - 1);
 $('nextBtn').onclick = () => goTo(cur + 1);
 $('addBtn').onclick = () => { pages.splice(cur + 1, 0, newPage()); goTo(cur + 1); };
@@ -790,6 +819,7 @@ function updateUI(){
   $('selGroup').style.display = tool === 'move' ? 'flex' : 'none';
   $('copyBtn').disabled = $('cutBtn').disabled = $('delSelBtn').disabled = !sel.length;
   $('pasteBtn').disabled = !clip;
+  $('cropBtn').disabled = !(lastRect && rectImages(lastRect).length);
 }
 let toastT;
 function toast(msg, ms = 2600){ const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
@@ -824,7 +854,7 @@ async function importImage(f){
 async function importPdf(f){
   if (!window.pdfjsLib){ toast('PDFの読み込み機能を準備できませんでした'); return; }
   const data = new Uint8Array(await f.arrayBuffer());
-  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/';
   const pdf = await pdfjsLib.getDocument({
     data,
     cMapUrl: PDFJS + 'cmaps/', cMapPacked: true,            // 日本語などのフォント表
