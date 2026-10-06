@@ -81,6 +81,26 @@ main{position:relative;background:var(--wall);display:flex;align-items:center;ju
   padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
 #toast.show{opacity:1}
 dialog{border:none;border-radius:16px;padding:18px;background:var(--chrome);color:var(--ink);max-width:min(92vw,820px);width:100%}
+#libDlg,#pdfDlg{max-width:min(94vw,860px)}
+.pdfBar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.pdfBar input{flex:1;min-width:160px;font:inherit;font-size:16px;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:10px;height:42px;padding:0 12px;-webkit-user-select:text;user-select:text}
+.pdfGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;max-height:58vh;overflow-y:auto;padding:2px}
+.pdfTile{position:relative;height:auto;min-height:0;padding:4px;flex-direction:column;border-radius:8px;border:2px solid var(--line)}
+.pdfTile img{display:block;width:100%;aspect-ratio:1/1.414;object-fit:contain;background:#fff;border-radius:4px}
+.pdfTile span{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pdfTile.on{border-color:var(--rec);background:color-mix(in srgb,var(--rec) 10%,var(--btn))}
+.pdfTile.on::after{content:"✓";position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--rec);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.libSave{display:flex;gap:8px;margin-bottom:12px}
+.libSave input{flex:1;min-width:0;font:inherit;font-size:16px;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:10px;height:44px;padding:0 12px;-webkit-user-select:text;user-select:text}
+.libList{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;max-height:55vh;overflow-y:auto;padding:2px}
+.libItem{border:1px solid var(--line);border-radius:12px;padding:8px;background:var(--btn);display:flex;flex-direction:column;gap:6px}
+.libItem.cur{border:2px solid var(--ink)}
+.libItem img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#fff;border-radius:6px;border:1px solid var(--line)}
+.libItem .nm{font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.libItem .meta{font-size:12px;color:var(--muted)}
+.libItem .act{display:flex;gap:6px}
+.libItem .act button{flex:1;height:38px;font-size:13px}
+.libEmpty{color:var(--muted);font-size:14px;padding:20px 4px;grid-column:1/-1}
 dialog::backdrop{background:rgba(10,14,18,.55)}
 dialog video{width:100%;border-radius:8px;background:#000;display:block}
 dialog h2{font-size:18px;margin:0 0 12px}
@@ -111,6 +131,7 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
       <button id="darkBtn" class="toggle" aria-pressed="false" aria-label="黒板" title="黒板"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="1.5" style="fill:currentColor;fill-opacity:.85"/><path d="M8 21l2-4M16 21l-2-4"/></svg></button>
       <button id="ratioBtn" aria-label="ボードの縦横比">4:3</button>
       <button id="importBtn" aria-label="PDF・画像を読み込む" title="PDF・画像を読み込む"><svg viewBox="0 0 24 24"><path d="M12 3v11M7.5 9.5L12 14l4.5-4.5"/><path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3"/></svg></button>
+      <button id="libBtn" aria-label="ライブラリ" title="ライブラリ（ボードの保存・呼び出し）"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="4" height="16" rx="1"/><rect x="10" y="4" width="4" height="16" rx="1"/><path d="M16.5 5.2l3.6-1 3 15.4-3.6 1z" transform="translate(-2.2 .4)"/></svg></button>
       <input id="file" type="file" accept="image/*,application/pdf" multiple class="hide">
     </div>
     <div class="sep"></div>
@@ -176,6 +197,34 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
 </div>
 
 <div id="toast" role="status"></div>
+
+<dialog id="pdfDlg">
+  <h2 id="pdfTitle">PDF</h2>
+  <div class="pdfBar">
+    <input id="pdfRange" type="text" inputmode="numeric" placeholder="ページ指定（例：3-8, 12）" autocomplete="off">
+    <button id="pdfRangeBtn">選ぶ</button>
+    <button id="pdfAll">全部</button>
+    <button id="pdfNone">解除</button>
+  </div>
+  <div id="pdfGrid" class="pdfGrid"></div>
+  <div class="row">
+    <button id="pdfCancel">キャンセル</button>
+    <button id="pdfOk" class="primary">取り込む</button>
+  </div>
+</dialog>
+
+<dialog id="libDlg">
+  <h2>ライブラリ</h2>
+  <div class="libSave">
+    <input id="libName" type="text" placeholder="名前（例：例題11 正負の数）" autocomplete="off">
+    <button id="libSaveBtn" class="primary">今のボードを保存</button>
+  </div>
+  <div id="libList" class="libList"></div>
+  <div class="row">
+    <button id="libNewBtn">新しいボード</button>
+    <button id="libClose">閉じる</button>
+  </div>
+</dialog>
 
 <dialog id="recoverDlg">
   <h2>録画の復元</h2>
@@ -327,12 +376,12 @@ function drawItem(c, it){
   if (it.type === 'image'){ const im = getImg(it.src); if (im.complete && im.naturalWidth) c.drawImage(im, it.x, it.y, it.w, it.h); }
   else drawStroke(c, it);
 }
-function renderItems(c){
+function renderItems(c, list){
   c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
   c.fillStyle = BOARD_BG(); c.fillRect(0, 0, W, H);
   if (grid) drawGrid(c);
   const hidden = drag ? new Set(sel) : null;
-  for (const it of page().items){ if (!hidden || !hidden.has(it)) drawItem(c, it); }
+  for (const it of (list || page().items)){ if (!hidden || !hidden.has(it)) drawItem(c, it); }
 }
 function renderLayer(){ renderItems(lctx); layerDirty = false; recDirty = true; }
 // 書いている途中の線・動かしている途中のもの・レーザーなど（display=true のときは画面専用の補助表示も）
@@ -416,7 +465,8 @@ function loop(){
 
 /* ---------- undo ---------- */
 function snapshot(){ const pg = page(); pg.undo.push(pg.items.slice()); if (pg.undo.length > 100) pg.undo.shift(); pg.redo = []; }
-function changed(){ layerDirty = needsRender = true; updateUI(); scheduleSave(); }
+let libDirty = false, libCurId = null;
+function changed(){ layerDirty = needsRender = true; libDirty = true; updateUI(); scheduleSave(); }
 function undo(){ const pg = page(); if (!pg.undo.length) return; pg.redo.push(pg.items); pg.items = pg.undo.pop(); sel = []; changed(); }
 function redo(){ const pg = page(); if (!pg.redo.length) return; pg.undo.push(pg.items); pg.items = pg.redo.pop(); sel = []; changed(); }
 
@@ -781,11 +831,13 @@ async function importPdf(f){
     standardFontDataUrl: PDFJS + 'standard_fonts/',
     useSystemFonts: true,
   }).promise;
+  const nums = pdf.numPages === 1 ? [1] : await pickPdfPages(pdf, f.name);
+  if (!nums || !nums.length){ pdf.destroy(); return; }
   const insertAt = page().items.length ? cur + 1 : cur;
   const newPages = [];
-  for (let n = 1; n <= pdf.numPages; n++){
-    toast(`PDFを読み込み中 ${n} / ${pdf.numPages}`, 60000);
-    const pg = await pdf.getPage(n);
+  for (let k = 0; k < nums.length; k++){
+    toast(`PDFを読み込み中 ${k + 1} / ${nums.length}`, 60000);
+    const pg = await pdf.getPage(nums[k]);
     const v1 = pg.getViewport({ scale: 1 });
     const scale = Math.min(VW / v1.width, H / v1.height) * 1.5;
     const vp = pg.getViewport({ scale });
@@ -793,13 +845,76 @@ async function importPdf(f){
     const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
     await pg.render({ canvasContext: g, viewport: vp }).promise;
     const src = c.toDataURL('image/jpeg', 0.9);
-    const r = fitRect(c.width, c.height, VW, H);
+    c.width = c.height = 0; pg.cleanup();
+    const r = fitRect(vp.width, vp.height, VW, H);
     const p = newPage(); p.items.push({ type: 'image', src, x: (W - r.w) / 2, y: (H - r.h) / 2, w: r.w, h: r.h, locked: true });
     newPages.push(p);
   }
+  pdf.destroy();
   if (!page().items.length) pages.splice(cur, 1, ...newPages); else pages.splice(insertAt, 0, ...newPages);
   goTo(insertAt);
-  toast(`PDF ${pdf.numPages}ページを追加しました`);
+  toast(`PDF ${nums.length}ページを追加しました`);
+}
+// サムネイルを見ながら取り込むページを選ぶ（見えている分だけ小さく描くので、ページ数が多くても軽い）
+function pickPdfPages(pdf, name){
+  return new Promise(resolve => {
+    const N = pdf.numPages, chosen = new Set(N <= 10 ? Array.from({ length: N }, (_, i) => i + 1) : []);
+    const dlg = $('pdfDlg'), grid = $('pdfGrid');
+    $('pdfTitle').textContent = `${name}（全${N}ページ）`;
+    grid.innerHTML = ''; $('pdfRange').value = '';
+    const tiles = [];
+    const sync = () => {
+      tiles.forEach((t, i) => t.classList.toggle('on', chosen.has(i + 1)));
+      $('pdfOk').textContent = chosen.size ? `${chosen.size}ページを取り込む` : 'ページを選んでください';
+      $('pdfOk').disabled = !chosen.size;
+    };
+    // 描画は1枚ずつ順番に
+    let queue = [], busy = false, closed = false;
+    const pump = async () => {
+      if (busy || closed) return; busy = true;
+      while (queue.length && !closed){
+        const n = queue.shift(), t = tiles[n - 1]; if (t.dataset.done) continue;
+        try {
+          const pg = await pdf.getPage(n), v1 = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: 220 / v1.width });
+          const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+          const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+          await pg.render({ canvasContext: g, viewport: vp }).promise;
+          t.querySelector('img').src = c.toDataURL('image/jpeg', 0.7); t.dataset.done = '1'; pg.cleanup();
+        } catch (e){}
+      }
+      busy = false;
+    };
+    const io = new IntersectionObserver(es => {
+      for (const e of es) if (e.isIntersecting){ const n = +e.target.dataset.n; if (!e.target.dataset.done && !queue.includes(n)) queue.push(n); }
+      pump();
+    }, { root: grid, rootMargin: '300px' });
+    for (let n = 1; n <= N; n++){
+      const t = document.createElement('button'); t.type = 'button'; t.className = 'pdfTile'; t.dataset.n = n;
+      t.innerHTML = `<img alt=""><span>${n}</span>`;
+      t.onclick = () => { chosen.has(n) ? chosen.delete(n) : chosen.add(n); sync(); };
+      grid.appendChild(t); tiles.push(t); io.observe(t);
+    }
+    const finish = v => { closed = true; io.disconnect(); dlg.close(); resolve(v); };
+    $('pdfAll').onclick = () => { for (let n = 1; n <= N; n++) chosen.add(n); sync(); };
+    $('pdfNone').onclick = () => { chosen.clear(); sync(); };
+    $('pdfRangeBtn').onclick = () => {
+      // 「3-8, 12」のような指定
+      const txt = $('pdfRange').value.replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).replace(/[〜～ー－−]/g, '-').replace(/[、，]/g, ',');
+      let any = false;
+      for (const part of txt.split(',')){
+        const m = part.trim().match(/^(\d+)\s*(?:-\s*(\d+))?$/); if (!m) continue;
+        let a = +m[1], b = m[2] ? +m[2] : a; if (a > b) [a, b] = [b, a];
+        for (let n = Math.max(1, a); n <= Math.min(N, b); n++){ chosen.add(n); any = true; }
+      }
+      if (any){ sync(); const first = Math.min(...chosen); tiles[first - 1].scrollIntoView({ block: 'center' }); }
+      else toast('「3-8, 12」のように入力してください');
+    };
+    $('pdfRange').onkeydown = e => { if (e.key === 'Enter'){ e.preventDefault(); $('pdfRangeBtn').click(); } };
+    $('pdfCancel').onclick = () => finish(null);
+    $('pdfOk').onclick = () => finish([...chosen].sort((a, b) => a - b));
+    dlg.oncancel = e => { e.preventDefault(); finish(null); };
+    sync(); dlg.showModal();
+  });
 }
 
 /* ---------- 場面（断片化MP4）をつなげて1本にする ---------- */
@@ -1219,6 +1334,7 @@ function setRecUI(){
   $('recBtn').disabled = st === 'starting' || st === 'busy';
   $('quality').disabled = $('ratioBtn').disabled = st !== 'idle';
   $('qualityWrap').classList.toggle('hide', st !== 'idle');
+  $('libBtn').disabled = st !== 'idle';
   $('gainWrap').classList.toggle('hide', st !== 'idle');
   $('recTime').style.color = st === 'paused' ? 'var(--muted)' : '';
 }
@@ -1421,15 +1537,86 @@ async function checkRecovery(){
   };
 }
 
+/* ---------- ライブラリ（ボードの保存・呼び出し） ---------- */
+async function libTx(mode, fn){
+  try {
+    const db = await openDB();
+    return await new Promise((res, rej) => {
+      const tx = db.transaction('lib', mode); let out; const r = fn(tx.objectStore('lib'));
+      if (r) r.onsuccess = () => { out = r.result; };
+      tx.oncomplete = () => res(out); tx.onerror = () => rej(tx.error);
+    });
+  } catch (e){ toast('ライブラリを使えませんでした（保存領域が使えない状態です）'); return undefined; }
+}
+const hasContent = () => pages.some(p => p.items.length);
+async function makeThumb(){
+  const tw = 320, th = Math.round(tw * H / VW), c = document.createElement('canvas'); c.width = tw; c.height = th;
+  const g = c.getContext('2d'), k = tw / VW;
+  const items = pages[0].items;
+  await Promise.all(items.filter(i => i.type === 'image').map(i => new Promise(r => { const im = getImg(i.src); if (im.complete) r(); else { im.addEventListener('load', r, { once: true }); im.addEventListener('error', r, { once: true }); } })));
+  g.setTransform(k, 0, 0, k, -X0 * k, 0);
+  const keepDrag = drag; drag = null; renderItems(g, items); drag = keepDrag;
+  return c.toDataURL('image/jpeg', 0.75);
+}
+const fmtDate = t => { const d = new Date(t), z = n => String(n).padStart(2, '0'); return `${d.getMonth() + 1}/${d.getDate()} ${z(d.getHours())}:${z(d.getMinutes())}`; };
+async function libRender(){
+  const list = (await libTx('readonly', st => st.getAll())) || [];
+  list.sort((a, b) => b.updated - a.updated);
+  const box = $('libList'); box.innerHTML = '';
+  if (!list.length){ box.innerHTML = '<div class="libEmpty">まだ保存されたボードはありません。名前を付けて「今のボードを保存」を押すと、ここに並びます。</div>'; return; }
+  for (const e of list){
+    const el = document.createElement('div'); el.className = 'libItem' + (e.id === libCurId ? ' cur' : '');
+    el.innerHTML = `<img alt=""><div class="nm"></div><div class="meta"></div><div class="act"><button class="primary" data-a="open">開く</button><button data-a="del">削除</button></div>`;
+    el.querySelector('img').src = e.thumb || ''; el.querySelector('.nm').textContent = e.name;
+    el.querySelector('.meta').textContent = `${e.pages.length}ページ・${fmtDate(e.updated)}`;
+    const ob = el.querySelector('[data-a="open"]'), db = el.querySelector('[data-a="del"]');
+    ob.onclick = () => { const go = () => libOpen(e); if (libDirty && hasContent() && e.id !== libCurId) armConfirm(ob, '今のボードは消えます。もう一度で開く', go); else go(); };
+    db.onclick = () => armConfirm(db, 'もう一度で削除', async () => { await libTx('readwrite', st => st.delete(e.id)); if (libCurId === e.id) libCurId = null; libRender(); });
+    box.appendChild(el);
+  }
+}
+function libOpen(e){
+  pages = e.pages.map(p => ({ items: p.items.slice(), undo: [], redo: [] }));
+  cur = 0; grid = !!e.grid; $('gridBtn').setAttribute('aria-pressed', grid);
+  setDark(!!e.dark); setRatio(e.ratio || '4:3'); sel = []; drawing = null; lasso = null;
+  changed(); libCurId = e.id; libDirty = false; $('libName').value = e.name; clearTimeout(saveT); saveNow();
+  $('libDlg').close(); toast(`「${e.name}」を開きました`);
+}
+async function libSave(){
+  const name = $('libName').value.trim() || `ボード ${fmtDate(Date.now())}`;
+  const list = (await libTx('readonly', st => st.getAll())) || [];
+  const same = list.find(x => x.name === name);
+  const doSave = async () => {
+    const e = { id: same ? same.id : 'b' + Date.now().toString(36), name, updated: Date.now(),
+      pages: pages.map(p => ({ items: p.items })), grid, dark, ratio: VW === 1440 ? '4:3' : '16:9', thumb: await makeThumb() };
+    await libTx('readwrite', st => st.put(e));
+    libCurId = e.id; libDirty = false; $('libName').value = name; clearTimeout(saveT); saveNow(); toast(`「${name}」を保存しました`); libRender();
+  };
+  if (same && same.id !== libCurId) armConfirm($('libSaveBtn'), '同じ名前があります。もう一度で上書き', doSave);
+  else doSave();
+}
+$('libBtn').onclick = () => { libRender(); $('libDlg').showModal(); };
+$('libClose').onclick = () => $('libDlg').close();
+$('libSaveBtn').onclick = libSave;
+$('libName').addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); libSave(); } });
+$('libNewBtn').onclick = () => {
+  const go = () => {
+    pages = [newPage()]; cur = 0; sel = []; changed(); libCurId = null; libDirty = false; $('libName').value = ''; clearTimeout(saveT); saveNow();
+    $('libDlg').close(); toast('新しいボードにしました');
+  };
+  if (libDirty && hasContent()) armConfirm($('libNewBtn'), '今のボードは消えます。もう一度で新規', go); else go();
+};
+
 /* ---------- autosave (IndexedDB) ---------- */
 let dbP = null;
 function openDB(){
   if (!dbP) dbP = new Promise((res, rej) => {
-    const r = indexedDB.open('bansho-recorder', 2);
+    const r = indexedDB.open('bansho-recorder', 3);
     r.onupgradeneeded = () => {
       const db = r.result;
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
       if (!db.objectStoreNames.contains('rec')) db.createObjectStore('rec');
+      if (!db.objectStoreNames.contains('lib')) db.createObjectStore('lib', { keyPath: 'id' });
     };
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   });
@@ -1440,7 +1627,7 @@ function scheduleSave(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 800); 
 async function saveNow(){
   try {
     const db = await openDB();
-    const data = { pages: pages.map(p => ({ items: p.items })), cur, grid, dark, ratio: VW === 1440 ? '4:3' : '16:9' };
+    const data = { pages: pages.map(p => ({ items: p.items })), cur, grid, dark, ratio: VW === 1440 ? '4:3' : '16:9', libCurId, libDirty, libName: $('libName').value };
     await new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(data, 'project'); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   } catch (e){ /* storage unavailable: keep working in memory */ }
 }
@@ -1453,6 +1640,7 @@ async function load(){
       cur = Math.min(data.cur || 0, pages.length - 1); grid = !!data.grid;
       $('gridBtn').setAttribute('aria-pressed', grid);
       setDark(!!data.dark); setRatio(data.ratio || '4:3');
+      libCurId = data.libCurId || null; $('libName').value = data.libName || ''; libDirty = !!data.libDirty;
     }
   } catch (e){}
   layerDirty = needsRender = true; updateUI();
