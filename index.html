@@ -75,7 +75,7 @@ aside hr{border:0;border-top:1px solid var(--line);margin:4px 2px;width:auto}
 .size[aria-pressed="true"]{border:2px solid var(--ink)}
 main{position:relative;background:var(--wall);display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;padding:3px}
 #board{display:block;background:#fff;border-radius:6px;box-shadow:0 0 0 2px var(--frame),0 3px 10px rgba(0,0,0,.15);touch-action:none}
-#zoomBtn{position:absolute;right:16px;bottom:16px;background:var(--on);color:var(--onInk);border-color:var(--on);font-weight:700;box-shadow:0 4px 12px rgba(0,0,0,.2)}
+#zoomBtn{position:absolute;right:16px;bottom:16px;height:52px;padding:0 18px;font-size:16px;border-radius:14px;background:var(--on);color:var(--onInk);border-color:var(--on);font-weight:700;box-shadow:0 4px 12px rgba(0,0,0,.25)}
 #countdown{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:120px;font-weight:700;color:#fff;
   background:rgba(20,28,36,.45);pointer-events:none}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--chrome);
@@ -309,7 +309,7 @@ function clampView(){ PX = Math.max(0, Math.min(VW - VW / Z, PX)); PY = Math.max
 function setView(z, px, py){
   Z = Math.max(1, Math.min(5, z)); PX = px; PY = py; clampView();
   applyT(ctx); applyT(lctx); layerDirty = needsRender = true;
-  const b = $('zoomBtn'); b.classList.toggle('hide', Z <= 1.01); b.textContent = '×' + Z.toFixed(1) + '  全体表示';
+  const b = $('zoomBtn'); b.classList.toggle('hide', Z <= 1.01); b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>元の大きさ（×' + Z.toFixed(1) + '）';
 }
 function setRatio(r){
   VW = r === '4:3' ? 1440 : 1920; X0 = (W - VW) / 2; Z = 1; PX = PY = 0; $('zoomBtn').classList.add('hide');
@@ -472,10 +472,10 @@ function render(){
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0); applyT(ctx);
   drawOverlays(ctx, true);
 }
-// 録画は拡大表示に関係なく、常にボード全体を撮る
+// 録画も画面と同じ範囲を撮る（拡大していれば、拡大した範囲が動画に映る）
 let recLayer = null, recLctx = null, recDirty = true;
 function renderRec(){
-  const k = recCanvas.width / VW, T = c => c.setTransform(k, 0, 0, k, -X0 * k, 0);
+  const k = recCanvas.width / VW * Z, T = c => c.setTransform(k, 0, 0, k, -(X0 + PX) * k, -PY * k);
   if (!recLayer || recLayer.width !== recCanvas.width || recLayer.height !== recCanvas.height){
     recLayer = document.createElement('canvas'); recLayer.width = recCanvas.width; recLayer.height = recCanvas.height;
     recLctx = recLayer.getContext('2d'); recDirty = true;
