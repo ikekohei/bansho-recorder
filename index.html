@@ -499,6 +499,12 @@ function loop(){
 function snapshot(){ const pg = page(); pg.undo.push(pg.items.slice()); if (pg.undo.length > 100) pg.undo.shift(); pg.redo = []; }
 let libDirty = false, libCurId = null;
 function changed(){ layerDirty = needsRender = true; libDirty = true; updateUI(); scheduleSave(); }
+// 書き終えた1本を足すだけのとき：ページ全体を描き直さず、その1本だけを描き足す
+function strokeAdded(s){
+  if (!layerDirty) drawStroke(lctx, s);
+  if (recLctx && !recDirty) drawStroke(recLctx, s);
+  needsRender = true; libDirty = true; updateUI(); scheduleSave();
+}
 function undo(){ const pg = page(); if (!pg.undo.length) return; pg.redo.push(pg.items); pg.items = pg.undo.pop(); sel = []; changed(); }
 function redo(){ const pg = page(); if (!pg.redo.length) return; pg.undo.push(pg.items); pg.items = pg.redo.pop(); sel = []; changed(); }
 
@@ -687,7 +693,7 @@ function endPointer(e){
   if (e.pointerType === 'touch'){ touches.delete(e.pointerId); if (pinch){ if (touches.size < 2) pinch = null; return; } }
   if (e.pointerId !== activeId) return;
   activeId = null;
-  if (drawing){ snapshot(); page().items.push(drawing); drawing = null; changed(); }
+  if (drawing){ const s = drawing; snapshot(); page().items.push(s); drawing = null; strokeAdded(s); }
   else if (erasing){ if (!erasing.hit) page().undo.pop(); else changed(); erasing = null; }
   else if (drag){
     const d = drag; drag = null;
@@ -1696,24 +1702,41 @@ $('libNewBtn').onclick = () => {
 let dbP = null;
 function openDB(){
   if (!dbP) dbP = new Promise((res, rej) => {
-    const r = indexedDB.open('bansho-recorder', 3);
+    const r = indexedDB.open('bansho-recorder', 4);
     r.onupgradeneeded = () => {
       const db = r.result;
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
       if (!db.objectStoreNames.contains('rec')) db.createObjectStore('rec');
       if (!db.objectStoreNames.contains('lib')) db.createObjectStore('lib', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('img')) db.createObjectStore('img');
     };
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   });
   return dbP;
 }
+// 自動保存：PDF・画像の中身は大きいので、初めて出てきたときに1回だけ別の場所へ保存し、
+// ふだんの保存では「どの画像か」の番号だけを書く（毎回MB単位のデータを書かない）
 let saveT;
-function scheduleSave(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 800); }
+const imgKey = new Map();   // 画像の中身（src） → 保存用の番号
+function scheduleSave(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 1500); }
 async function saveNow(){
+  if (activeId !== null || drawing){ scheduleSave(); return; }   // 書いている最中は保存しない
   try {
     const db = await openDB();
-    const data = { pages: pages.map(p => ({ items: p.items })), cur, grid, dark, ratio: VW === 1440 ? '4:3' : '16:9', libCurId, libDirty, libName: $('libName').value };
-    await new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(data, 'project'); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+    const fresh = [];
+    const slim = it => {
+      if (it.type !== 'image') return it;
+      let k = imgKey.get(it.src);
+      if (!k){ k = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); imgKey.set(it.src, k); fresh.push([k, it.src]); }
+      const { src, ...rest } = it; return { ...rest, ref: k };
+    };
+    const data = { v: 2, pages: pages.map(p => ({ items: p.items.map(slim) })), cur, grid, dark, ratio: VW === 1440 ? '4:3' : '16:9', libCurId, libDirty, libName: $('libName').value };
+    await new Promise((res, rej) => {
+      const tx = db.transaction(['kv', 'img'], 'readwrite');
+      for (const [k, src] of fresh) tx.objectStore('img').put(src, k);
+      tx.objectStore('kv').put(data, 'project');
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
   } catch (e){ /* storage unavailable: keep working in memory */ }
 }
 async function load(){
@@ -1721,6 +1744,21 @@ async function load(){
     const db = await openDB();
     const data = await new Promise((res, rej) => { const r = db.transaction('kv').objectStore('kv').get('project'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     if (data && data.pages && data.pages.length){
+      // 番号で保存した画像を中身に戻す。どのページからも使われなくなった画像はここで片付ける
+      const stored = await new Promise((res, rej) => {
+        const out = new Map(), tx = db.transaction('img'), req = tx.objectStore('img').openCursor();
+        req.onsuccess = () => { const c = req.result; if (c){ out.set(c.key, c.value); c.continue(); } };
+        tx.oncomplete = () => res(out); tx.onerror = () => rej(tx.error);
+      });
+      const used = new Set();
+      for (const p of data.pages) p.items = (p.items || []).map(it => {
+        if (it.type !== 'image' || !it.ref) return it;
+        const src = stored.get(it.ref); if (!src) return null;
+        used.add(it.ref); imgKey.set(src, it.ref);
+        const { ref, ...rest } = it; return { ...rest, src };
+      }).filter(Boolean);
+      const unused = [...stored.keys()].filter(k => !used.has(k));
+      if (unused.length){ const tx = db.transaction('img', 'readwrite'); for (const k of unused) tx.objectStore('img').delete(k); }
       pages = data.pages.map(p => ({ items: p.items || [], undo: [], redo: [] }));
       cur = Math.min(data.cur || 0, pages.length - 1); grid = !!data.grid;
       $('gridBtn').setAttribute('aria-pressed', grid);
