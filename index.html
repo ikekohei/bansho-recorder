@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="授業動画録画">
 <title>授業動画録画アプリ</title>
@@ -28,6 +28,8 @@
 }
 *,*::before,*::after{box-sizing:border-box}
 html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px);background:var(--chrome)}
+/* Safariの「ダブルタップで画面ごと拡大」を止める（ボタンのすき間やボードのまわりも含めて） */
+html,body,header,aside{touch-action:manipulation}
 body{height:100%;margin:0;background:var(--chrome);color:var(--ink);
   font-family:"Zen Kaku Gothic New","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overflow:hidden}
@@ -343,9 +345,9 @@ function smoothPts(p){
   o.push(p[n-1]); return o;
 }
 // Catmull-Rom 曲線で、離れた点のあいだを step 間隔の点で埋める
-function catmull(p, step){
-  const n = p.length; if (n < 2) return p;
-  const o = [p[0]];
+function catmull(p, step, idx){
+  const n = p.length; if (n < 2){ if (idx) idx.push(0); return p; }
+  const o = [p[0]]; if (idx) idx.push(0);
   for (let i = 0; i < n - 1; i++){
     const p0 = p[Math.max(0, i - 1)], p1 = p[i], p2 = p[i + 1], p3 = p[Math.min(n - 1, i + 2)];
     const k = Math.ceil(Math.hypot(p2.x - p1.x, p2.y - p1.y) / step);
@@ -357,7 +359,7 @@ function catmull(p, step){
         p: p1.p + (p2.p - p1.p) * t,
       });
     }
-    o.push(p2);
+    o.push(p2); if (idx) idx.push(o.length - 1);
   }
   return o;
 }
@@ -385,19 +387,48 @@ function drawStroke(c, s){
     for (let i = 1; i < p.length - 1; i++){ const mx = (p[i].x + p[i+1].x) / 2, my = (p[i].y + p[i+1].y) / 2; c.quadraticCurveTo(p[i].x, p[i].y, mx, my); }
     c.lineTo(p[p.length-1].x, p[p.length-1].y); c.stroke();
   } else {
-    // 速く書いて点がまばらでも途切れないよう、点の間を曲線で補ってから、丸い端の短い線をつないで描く
-    const q = smoothPts(smoothPts(catmull(p, 2.5)));
-    c.lineCap = 'round'; c.lineJoin = 'round';
-    let curW = Math.round(widthAt(s, q[0]) * 4) / 4;
-    c.beginPath(); c.moveTo(q[0].x, q[0].y);
-    for (let i = 1; i < q.length; i++){
-      const w = Math.round(widthAt(s, q[i]) * 4) / 4;
-      if (w !== curW){ c.lineWidth = curW; c.stroke(); c.beginPath(); c.moveTo(q[i-1].x, q[i-1].y); curW = w; }
-      c.lineTo(q[i].x, q[i].y);
-    }
-    c.lineWidth = curW; c.stroke();
+    const q = strokeQ(s);
+    drawQ(c, s, q, 0, q.length - 1);
   }
   c.restore();
+}
+// 速く書いて点がまばらでも途切れないよう、点の間を曲線で補ってから滑らかにした点列
+function strokeQ(s, idx){ return smoothPts(smoothPts(catmull(s.pts, 2.5, idx))); }
+// 点列の from〜to の部分を、丸い端の短い線をつないで描く（太さが変わるところで区切る）
+function drawQ(c, s, q, from, to){
+  if (to <= from) return;
+  c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.strokeStyle = ink(s.color);
+  let curW = Math.round(widthAt(s, q[from]) * 4) / 4;
+  c.beginPath(); c.moveTo(q[from].x, q[from].y);
+  for (let i = from + 1; i <= to; i++){
+    const w = Math.round(widthAt(s, q[i]) * 4) / 4;
+    if (w !== curW){ c.lineWidth = curW; c.stroke(); c.beginPath(); c.moveTo(q[i-1].x, q[i-1].y); curW = w; }
+    c.lineTo(q[i].x, q[i].y);
+  }
+  c.lineWidth = curW; c.stroke(); c.restore();
+}
+// 書いている途中の線：もう形が変わらない部分は、その場でボード（と録画用ボード）に描き込んでしまい、
+// 毎フレーム描くのはペン先に近い、まだ形が変わりうる部分だけにする（長い線でもペン先が遅れない）
+const live = new WeakMap();   // 線 → { done: ボードに描き込んだ位置, recDone: 録画用ボードに描き込んだ位置 }
+function liveOf(s){ let L = live.get(s); if (!L){ L = { done: 0, recDone: 0 }; live.set(s, L); } return L; }
+const usesLive = s => !s.hl && s.pts.length >= 2;
+function liveQ(s){
+  const idx = [], q = strokeQ(s, idx), n = s.pts.length;
+  // 曲線は2つ先の点まで、滑らかにする処理は前後2点ずつに影響するので、その分を残して確定とみなす
+  const stable = n >= 4 ? Math.max(0, idx[n - 3] - 2) : 0;
+  return { q, stable };
+}
+function commitLive(){
+  if (!drawing || !usesLive(drawing)) return null;
+  const L = liveOf(drawing), Q = liveQ(drawing);
+  if (!layerDirty && Q.stable - L.done >= 48){ drawQ(lctx, drawing, Q.q, L.done, Q.stable); L.done = Q.stable; }
+  if (recLctx && recCanvas && !recDirty && Q.stable - L.recDone >= 48){ drawQ(recLctx, drawing, Q.q, L.recDone, Q.stable); L.recDone = Q.stable; }
+  return Q;
+}
+function drawLiveTail(c, Q, rec){
+  if (!drawing) return;
+  if (!usesLive(drawing) || !Q){ drawStroke(c, drawing); return; }
+  const L = liveOf(drawing); drawQ(c, drawing, Q.q, rec ? L.recDone : L.done, Q.q.length - 1);
 }
 function drawItem(c, it){
   if (it.type === 'image'){ const im = getImg(it.src); if (im.complete && im.naturalWidth) c.drawImage(im, it.x, it.y, it.w, it.h); }
@@ -410,10 +441,11 @@ function renderItems(c, list){
   const hidden = drag ? new Set(sel) : null;
   for (const it of (list || page().items)){ if (!hidden || !hidden.has(it)) drawItem(c, it); }
 }
-function renderLayer(){ renderItems(lctx); layerDirty = false; recDirty = true; }
+function renderLayer(){ renderItems(lctx); layerDirty = false; recDirty = true; if (drawing) liveOf(drawing).done = 0; }
 // 書いている途中の線・動かしている途中のもの・レーザーなど（display=true のときは画面専用の補助表示も）
+let curLiveQ = null;
 function drawOverlays(c, display){
-  if (drawing) drawStroke(c, drawing);
+  if (drawing) drawLiveTail(c, curLiveQ, !display);
   if (tool === 'move'){
     const accent = dark ? '#7db3ff' : '#1f5fbf';
     if (drag){
@@ -469,6 +501,7 @@ function render(){
   const now = performance.now();
   laser = laser.filter(l => now - l.t < 700);
   if (layerDirty) renderLayer();
+  curLiveQ = commitLive();
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0); applyT(ctx);
   drawOverlays(ctx, true);
 }
@@ -480,7 +513,7 @@ function renderRec(){
     recLayer = document.createElement('canvas'); recLayer.width = recCanvas.width; recLayer.height = recCanvas.height;
     recLctx = recLayer.getContext('2d'); recDirty = true;
   }
-  if (recDirty){ T(recLctx); renderItems(recLctx); recDirty = false; }
+  if (recDirty){ T(recLctx); renderItems(recLctx); recDirty = false; if (drawing) liveOf(drawing).recDone = 0; }
   rctx.setTransform(1, 0, 0, 1, 0, 0); rctx.drawImage(recLayer, 0, 0); T(rctx);
   drawOverlays(rctx, false);
 }
@@ -501,8 +534,11 @@ let libDirty = false, libCurId = null;
 function changed(){ layerDirty = needsRender = true; libDirty = true; updateUI(); scheduleSave(); }
 // 書き終えた1本を足すだけのとき：ページ全体を描き直さず、その1本だけを描き足す
 function strokeAdded(s){
-  if (!layerDirty) drawStroke(lctx, s);
-  if (recLctx && !recDirty) drawStroke(recLctx, s);
+  // 書いている途中にボードへ描き込み済みの部分は飛ばして、残りだけを描き足す
+  const L = live.get(s), Q = L && usesLive(s) ? strokeQ(s) : null, end = Q ? Q.length - 1 : 0;
+  if (!layerDirty){ if (Q && L.done) drawQ(lctx, s, Q, L.done, end); else drawStroke(lctx, s); }
+  if (recLctx && !recDirty){ if (Q && L.recDone) drawQ(recLctx, s, Q, L.recDone, end); else drawStroke(recLctx, s); }
+  curLiveQ = null;
   needsRender = true; libDirty = true; updateUI(); scheduleSave();
 }
 function undo(){ const pg = page(); if (!pg.undo.length) return; pg.redo.push(pg.items); pg.items = pg.undo.pop(); sel = []; changed(); }
@@ -613,7 +649,8 @@ function tfItem(it, a, dx, dy, s){
 
 const touches = new Map(); let pinch = null;
 function cancelAction(){
-  if (drawing) drawing = null;
+  // 書きかけの線を取り消すとき、途中までボードに描き込んだ分も消すため描き直す
+  if (drawing){ const L = live.get(drawing); if (L && (L.done || L.recDone)){ layerDirty = true; recDirty = true; } drawing = null; curLiveQ = null; }
   if (erasing){ const pg = page(); if (erasing.hit) pg.items = pg.undo.pop(); else pg.undo.pop(); erasing = null; layerDirty = true; }
   if (drag){ drag = null; layerDirty = true; }
   lasso = null; laserDown = false; activeId = null; needsRender = true;
@@ -725,6 +762,17 @@ cv.addEventListener('pointerleave', () => { if (hoverPt){ hoverPt = null; needsR
 cv.addEventListener('pointercancel', endPointer);
 stage.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault());
+// ボードの上やまわりを素早く2回タップしたとき、Safariが画面ごと拡大しないようにする
+// （ボタン・入力欄・ダイアログの中は普通に押せるよう対象外）
+let lastTouchEnd = 0;
+document.addEventListener('touchend', e => {
+  const now = Date.now();
+  const t = e.target;
+  const exempt = t.closest && t.closest('button, input, select, label, dialog, a');
+  if (!exempt && now - lastTouchEnd < 350) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
 $('zoomBtn').onclick = () => setView(1, 0, 0);
 
 /* ---------- toolbar ---------- */
