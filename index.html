@@ -674,7 +674,12 @@ cv.addEventListener('pointerdown', e => {
   if (e.pointerType === 'pen') penSeen = true;
   // Pencilを使い始めたら、指1本の操作は無視する（手のひらが触れて選択が外れたり線が出たりしないように。指2本の拡大は別処理）
   if (penSeen && e.pointerType === 'touch') return;
-  if (activeId !== null) return;
+  if (activeId !== null){
+    // 前の線の「ペンを離した」合図を取りこぼしたまま次の線が始まった：前の線をここで終わらせる
+    // （iPadのSafariはPencilの線ごとに同じ番号を使うことがあり、放っておくと前の線とつながってしまう）
+    if (e.pointerId === activeId || e.pointerType === 'pen') endPointer({ pointerId: activeId, pointerType: 'pen' });
+    else return;
+  }
   e.preventDefault();
   activeId = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (_){}
   const pt = toBoard(e);
@@ -713,6 +718,8 @@ cv.addEventListener('pointermove', e => {
   }
   if (activeId === null && tool === 'eraser' && e.pointerType !== 'touch'){ hoverPt = toBoard(e); needsRender = true; }
   if (e.pointerId !== activeId) return;
+  // 画面から離れている（Pencilを浮かせている）のに動きが届いた＝離した合図を取りこぼしている。ここで線を終わらせる
+  if (e.pointerType === 'pen' ? (e.buttons === 0 && e.pressure === 0) : (e.pointerType === 'mouse' && e.buttons === 0)){ endPointer(e); return; }
   const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   if (drawing){ for (const ev of (evs.length ? evs : [e])){ const pt = toBoard(ev); const L = drawing.pts[drawing.pts.length-1]; if (Math.hypot(pt.x - L.x, pt.y - L.y) > 0.6){ pt.p = L.p * 0.65 + pt.p * 0.35; drawing.pts.push(pt); } } }
   else if (erasing){ for (const ev of (evs.length ? evs : [e])) { const np = toBoard(ev); eraseAlong(erasing.pt, np); erasing.pt = np; } }
@@ -760,6 +767,8 @@ function endPointer(e){
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointerleave', () => { if (hoverPt){ hoverPt = null; needsRender = true; } });
 cv.addEventListener('pointercancel', endPointer);
+// 入力の追いかけが外れたとき（離した合図の代わりにこれだけ届くことがある）も線を終わらせる
+cv.addEventListener('lostpointercapture', e => { if (e.pointerId === activeId && e.pointerType !== 'touch') endPointer(e); });
 stage.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault());
 // ボードの上やまわりを素早く2回タップしたとき、Safariが画面ごと拡大しないようにする
