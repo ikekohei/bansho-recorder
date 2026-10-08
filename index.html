@@ -687,7 +687,8 @@ function tfItem(it, a, dx, dy, s){
 
 const touches = new Map(); let pinch = null;
 // レーザーの太さ（細・中・太のボタンの値 → 倍率）。前回選んだ太さを覚えておく
-const LASER_SCALE = { 2.5: 0.55, 4.5: 1, 8: 1.7 };
+// 最初の太さが太すぎたので、中を0.7倍にし、細・太も同じ割合で細くしている
+const LASER_SCALE = { 2.5: 0.4, 4.5: 0.7, 8: 1.2 };
 let laserKey = 4.5;
 try { const v = +localStorage.getItem('bansho-laser'); if (LASER_SCALE[v]) laserKey = v; } catch (e){}
 let penAir = false, zeroRun = 0;   // ペンが触れたまま浮いている（筆圧0が続いている）状態
