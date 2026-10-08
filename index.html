@@ -234,6 +234,7 @@ dialog p{font-size:14px;color:var(--muted);margin:10px 0 0;line-height:1.7}
   </div>
   <div id="libList" class="libList"></div>
   <div class="row">
+    <button id="diagBtn" title="直近に書いた線の、ペンから届いた生の点を保存します（不具合の調査用）">書き心地の記録を保存</button>
     <button id="libNewBtn">新しいボード</button>
     <button id="libClose">閉じる</button>
   </div>
@@ -802,6 +803,30 @@ cv.addEventListener('pointerleave', () => { if (hoverPt){ hoverPt = null; needsR
 cv.addEventListener('pointercancel', endPointer);
 // 入力の追いかけが外れたとき（離した合図の代わりにこれだけ届くことがある）も線を終わらせる
 cv.addEventListener('lostpointercapture', e => { if (e.pointerId === activeId && e.pointerType !== 'touch') endPointer(e); });
+
+/* ---------- 書き心地の記録（不具合調査用） ----------
+   直近40本ぶん、ペンから届いた生の点（位置・筆圧・ボタン・まとめて届いた点）をそのまま覚えておき、
+   ライブラリの「書き心地の記録を保存」でファイルにできる。アプリの動きには影響しない */
+const diag = []; let diagCur = null;
+function diagLog(e){
+  if (e.pointerType === 'touch') return;
+  const b = boardAt(e.clientX, e.clientY), r1 = v => Math.round(v * 10) / 10, r3 = v => Math.round(v * 1000) / 1000;
+  const row = { t: e.type.replace('lostpointercapture', 'lost').replace('pointer', ''), ms: Math.round(performance.now()), id: e.pointerId, x: r1(b.x), y: r1(b.y), p: r3(e.pressure), b: e.buttons };
+  if (e.type === 'pointermove' && e.getCoalescedEvents){ const cs = e.getCoalescedEvents(); if (cs.length > 1 || (cs[0] && (cs[0].clientX !== e.clientX || cs[0].clientY !== e.clientY))) row.c = cs.map(c => { const q = boardAt(c.clientX, c.clientY); return [r1(q.x), r1(q.y), r3(c.pressure)]; }); }
+  if (e.type === 'pointerdown'){ diagCur = { k: e.pointerType, tool, active: activeId, ev: [] }; diag.push(diagCur); if (diag.length > 40) diag.shift(); }
+  if (diagCur && diagCur.ev.length < 3000) diagCur.ev.push(row);
+}
+for (const t of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture']) cv.addEventListener(t, diagLog, { capture: true });
+// 線が確定したときの点の数と両端も残す（生の点と見比べるため）
+const _finishDrawing = finishDrawing;
+finishDrawing = function(){ if (drawing && diagCur){ const p = drawing.pts; (diagCur.saved = diagCur.saved || []).push({ n: p.length, first: [Math.round(p[0].x), Math.round(p[0].y)], last: [Math.round(p[p.length - 1].x), Math.round(p[p.length - 1].y)] }); } _finishDrawing(); };
+$('diagBtn').onclick = async () => {
+  if (!diag.length){ toast('まだ記録がありません。何本か書いてから押してください'); return; }
+  const info = { ua: navigator.userAgent, dpr: devicePixelRatio, board: [cv.width, cv.height], css: [cv.clientWidth, cv.clientHeight], zoom: Z, at: new Date().toISOString(), strokes: diag };
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  const r = await saveOne(new Blob([JSON.stringify(info)], { type: 'application/json' }), `kakigokochi_${d.getMonth() + 1}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}.json`);
+  if (r === 'ok') toast('記録を保存しました');
+};
 stage.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault());
 // ボードの上やまわりを素早く2回タップしたとき、Safariが画面ごと拡大しないようにする
