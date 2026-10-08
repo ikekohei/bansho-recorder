@@ -515,19 +515,20 @@ function drawOverlays(c, display){
   }
   const now = performance.now();
   if (laser.length){
+    const m = LASER_SCALE[laserKey] || 1;   // 細・中・太
     c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
     for (let i = 1; i < laser.length; i++){
       const a = laser[i-1], b = laser[i]; if (b.t - a.t > 120) continue;
       const k = Math.max(0, 1 - (now - b.t) / 700);
-      c.strokeStyle = `rgba(255,40,40,${0.25 * k})`; c.lineWidth = 22 * k;
+      c.strokeStyle = `rgba(255,40,40,${0.25 * k})`; c.lineWidth = 22 * m * k;
       c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
-      c.strokeStyle = `rgba(255,30,30,${0.85 * k})`; c.lineWidth = 7 * k;
+      c.strokeStyle = `rgba(255,30,30,${0.85 * k})`; c.lineWidth = 7 * m * k;
       c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
     }
     const h = laser[laser.length-1];
     if (now - h.t < 700 && laserDown){
-      c.fillStyle = 'rgba(255,40,40,.3)'; c.beginPath(); c.arc(h.x, h.y, 20, 0, Math.PI * 2); c.fill();
-      c.fillStyle = '#ff2a2a'; c.beginPath(); c.arc(h.x, h.y, 8, 0, Math.PI * 2); c.fill();
+      c.fillStyle = 'rgba(255,40,40,.3)'; c.beginPath(); c.arc(h.x, h.y, 20 * m, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#ff2a2a'; c.beginPath(); c.arc(h.x, h.y, 8 * m, 0, Math.PI * 2); c.fill();
     }
     c.restore();
   }
@@ -685,6 +686,10 @@ function tfItem(it, a, dx, dy, s){
 }
 
 const touches = new Map(); let pinch = null;
+// レーザーの太さ（細・中・太のボタンの値 → 倍率）。前回選んだ太さを覚えておく
+const LASER_SCALE = { 2.5: 0.55, 4.5: 1, 8: 1.7 };
+let laserKey = 4.5;
+try { const v = +localStorage.getItem('bansho-laser'); if (LASER_SCALE[v]) laserKey = v; } catch (e){}
 let penAir = false, zeroRun = 0;   // ペンが触れたまま浮いている（筆圧0が続いている）状態
 let lastMoveKey = '';               // 直前に処理した動きの中身（同じ知らせが2回届いたときに見分ける）
 function newDrawing(pt){
@@ -895,11 +900,11 @@ function syncColors(){
   document.querySelectorAll('[data-color]').forEach(x => x.setAttribute('aria-pressed', x.dataset.color === c));
   document.querySelectorAll('.hlOnly').forEach(x => x.classList.toggle('hide', !hl));
   document.querySelectorAll('[data-color]').forEach(x => x.style.setProperty('--c', ink(x.dataset.color)));
-  const er = tool === 'eraser';
-  $('inkGroup').style.display = (tool === 'pen' || tool === 'hl' || er) ? 'contents' : 'none';
-  $('colorGroup').style.display = er ? 'none' : 'contents';
+  const er = tool === 'eraser', lz = tool === 'laser';
+  $('inkGroup').style.display = (tool === 'pen' || tool === 'hl' || er || lz) ? 'contents' : 'none';
+  $('colorGroup').style.display = (er || lz) ? 'none' : 'contents';
   $('eraseGroup').style.display = er ? 'flex' : 'none';
-  const k = er ? eraseKey : size;
+  const k = er ? eraseKey : lz ? laserKey : size;
   document.querySelectorAll('[data-size]').forEach(x => x.setAttribute('aria-pressed', +x.dataset.size === k));
   document.querySelectorAll('[data-emode]').forEach(x => x.setAttribute('aria-pressed', x.dataset.emode === eraseMode));
   if (!er) hoverPt = null;
@@ -910,7 +915,9 @@ document.querySelectorAll('[data-color]').forEach(b => b.onclick = () => {
   if (tool !== 'pen') document.querySelector('[data-tool="pen"]').click(); else syncColors();
 });
 document.querySelectorAll('[data-size]').forEach(b => b.onclick = () => {
-  if (tool === 'eraser') eraseKey = +b.dataset.size; else size = +b.dataset.size;
+  if (tool === 'eraser') eraseKey = +b.dataset.size;
+  else if (tool === 'laser'){ laserKey = +b.dataset.size; try { localStorage.setItem('bansho-laser', laserKey); } catch (e){} }
+  else size = +b.dataset.size;
   syncColors();
 });
 document.querySelectorAll('[data-emode]').forEach(b => b.onclick = () => { eraseMode = b.dataset.emode; syncColors(); });
