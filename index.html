@@ -650,6 +650,7 @@ function tfItem(it, a, dx, dy, s){
 
 const touches = new Map(); let pinch = null;
 let penAir = false, zeroRun = 0;   // ペンが触れたまま浮いている（筆圧0が続いている）状態
+let lastMoveKey = '';               // 直前に処理した動きの中身（同じ知らせが2回届いたときに見分ける）
 function newDrawing(pt){
   return { type: 'stroke', color: tool === 'hl' ? hlColor : penColor, size: tool === 'hl' ? ({2.5:14,4.5:24,8:38}[size] || 24) : size, hl: tool === 'hl', pts: [pt] };
 }
@@ -728,6 +729,11 @@ cv.addEventListener('pointermove', e => {
   // 画面から離れている（Pencilを浮かせている）のに動きが届いた＝離した合図を取りこぼしている。ここで線を終わらせる
   if (e.pointerType === 'pen' ? (e.buttons === 0 && e.pressure === 0) : (e.pointerType === 'mouse' && e.buttons === 0)){ endPointer(e); return; }
   const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  // iPadのSafariは、同じ中身の動きの知らせを2回続けて送ってくる。2回目も処理すると、
+  // まとめて届いた点の最初まで直線で戻ってなぞり直してしまう（素早く書いた「(」が「D」になる）ので無視する
+  const moveKey = e.pointerId + '|' + (evs.length ? evs : [e]).map(c => c.clientX + ',' + c.clientY + ',' + c.pressure).join(';');
+  if (moveKey === lastMoveKey) return;
+  lastMoveKey = moveKey;
   if (drawing || penAir){
     for (const ev of (evs.length ? evs : [e])){
       // 軽い筆圧でサッと浮かせると、iPadは「触れたまま・筆圧0」の点を送ってくることがある。
