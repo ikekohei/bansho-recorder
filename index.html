@@ -648,12 +648,17 @@ function tfItem(it, a, dx, dy, s){
 }
 
 const touches = new Map(); let pinch = null;
+let penAir = false, zeroRun = 0;   // ペンが触れたまま浮いている（筆圧0が続いている）状態
+function newDrawing(pt){
+  return { type: 'stroke', color: tool === 'hl' ? hlColor : penColor, size: tool === 'hl' ? ({2.5:14,4.5:24,8:38}[size] || 24) : size, hl: tool === 'hl', pts: [pt] };
+}
+function finishDrawing(){ const s = drawing; snapshot(); page().items.push(s); drawing = null; strokeAdded(s); }
 function cancelAction(){
   // 書きかけの線を取り消すとき、途中までボードに描き込んだ分も消すため描き直す
   if (drawing){ const L = live.get(drawing); if (L && (L.done || L.recDone)){ layerDirty = true; recDirty = true; } drawing = null; curLiveQ = null; }
   if (erasing){ const pg = page(); if (erasing.hit) pg.items = pg.undo.pop(); else pg.undo.pop(); erasing = null; layerDirty = true; }
   if (drag){ drag = null; layerDirty = true; }
-  lasso = null; laserDown = false; activeId = null; needsRender = true;
+  lasso = null; laserDown = false; activeId = null; penAir = false; zeroRun = 0; needsRender = true;
 }
 function pinchInfo(){
   const [a, b] = [...touches.values()];
@@ -683,8 +688,9 @@ cv.addEventListener('pointerdown', e => {
   e.preventDefault();
   activeId = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (_){}
   const pt = toBoard(e);
+  penAir = false; zeroRun = 0;
   if (tool === 'pen' || tool === 'hl'){
-    drawing = { type: 'stroke', color: tool === 'hl' ? hlColor : penColor, size: tool === 'hl' ? ({2.5:14,4.5:24,8:38}[size] || 24) : size, hl: tool === 'hl', pts: [pt] };
+    drawing = newDrawing(pt);
   } else if (tool === 'eraser'){
     snapshot(); erasing = { hit: false, pt }; eraseAt(pt);
   } else if (tool === 'laser'){
@@ -721,7 +727,33 @@ cv.addEventListener('pointermove', e => {
   // 画面から離れている（Pencilを浮かせている）のに動きが届いた＝離した合図を取りこぼしている。ここで線を終わらせる
   if (e.pointerType === 'pen' ? (e.buttons === 0 && e.pressure === 0) : (e.pointerType === 'mouse' && e.buttons === 0)){ endPointer(e); return; }
   const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-  if (drawing){ for (const ev of (evs.length ? evs : [e])){ const pt = toBoard(ev); const L = drawing.pts[drawing.pts.length-1]; if (Math.hypot(pt.x - L.x, pt.y - L.y) > 0.6){ pt.p = L.p * 0.65 + pt.p * 0.35; drawing.pts.push(pt); } } }
+  if (drawing || penAir){
+    for (const ev of (evs.length ? evs : [e])){
+      // 軽い筆圧でサッと浮かせると、iPadは「触れたまま・筆圧0」の点を送ってくることがある。
+      // 筆圧0が続いたら、そこで線を区切る（浮かせている間の動きを線にしない）。筆圧が戻ったら新しい線を始める
+      if (ev.pointerType === 'pen' && !(ev.pressure >= 0.01)){
+        zeroRun++;
+        if (zeroRun >= 2 && drawing && !penAir){
+          // 書き始めてすぐ（まだ1点だけ）なら、書き出しで筆圧が一瞬0になっただけかもしれないので保留する
+          if (drawing.pts.length > 1) finishDrawing();
+          penAir = true;
+        }
+        continue;
+      }
+      zeroRun = 0;
+      const pt = toBoard(ev);
+      if (penAir){
+        penAir = false;
+        if (drawing){
+          // 保留していた1点の近くで筆圧が戻った＝同じ線の続き。離れた場所なら、その1点は点として残して新しい線にする
+          const P = drawing.pts[0];
+          if (Math.hypot(pt.x - P.x, pt.y - P.y) >= 24){ finishDrawing(); drawing = newDrawing(pt); continue; }
+        } else { drawing = newDrawing(pt); continue; }
+      }
+      const L = drawing.pts[drawing.pts.length-1];
+      if (Math.hypot(pt.x - L.x, pt.y - L.y) > 0.6){ pt.p = L.p * 0.65 + pt.p * 0.35; drawing.pts.push(pt); }
+    }
+  }
   else if (erasing){ for (const ev of (evs.length ? evs : [e])) { const np = toBoard(ev); eraseAlong(erasing.pt, np); erasing.pt = np; } }
   else if (tool === 'laser'){ for (const ev of (evs.length ? evs : [e])){ const pt = toBoard(ev); laser.push({ x: pt.x, y: pt.y, t: performance.now() }); } }
   else if (drag){
@@ -737,7 +769,8 @@ function endPointer(e){
   if (e.pointerType === 'touch'){ touches.delete(e.pointerId); if (pinch){ if (touches.size < 2) pinch = null; return; } }
   if (e.pointerId !== activeId) return;
   activeId = null;
-  if (drawing){ const s = drawing; snapshot(); page().items.push(s); drawing = null; strokeAdded(s); }
+  penAir = false; zeroRun = 0;
+  if (drawing) finishDrawing();
   else if (erasing){ if (!erasing.hit) page().undo.pop(); else changed(); erasing = null; }
   else if (drag){
     const d = drag; drag = null;
