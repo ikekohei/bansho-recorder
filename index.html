@@ -376,22 +376,37 @@ const DARK_MAP = { '#1a1a1a': '#f4f4ee', '#d62828': '#ff7b7b', '#1f5fbf': '#7db3
 function ink(c){ return dark ? (DARK_MAP[c] || c) : c; }
 const BOARD_BG = () => dark ? '#1c211f' : '#ffffff';
 function widthAt(s, p){ return s.hl ? s.size : s.size * (0.35 + p.p * 1.3); }
-function drawStroke(c, s){
+function drawStroke(c, s, opaque){
   const p = s.pts; if (!p.length) return;
   c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.strokeStyle = ink(s.color); c.fillStyle = ink(s.color);
-  if (s.hl){ if (dark){ c.globalAlpha = .5; c.globalCompositeOperation = 'screen'; } else { c.globalAlpha = .38; c.globalCompositeOperation = 'multiply'; } }
+  if (s.hl && !opaque){ if (dark){ c.globalAlpha = .5; c.globalCompositeOperation = 'screen'; } else { c.globalAlpha = .38; c.globalCompositeOperation = 'multiply'; } }
   if (p.length === 1){
     c.beginPath(); c.arc(p[0].x, p[0].y, widthAt(s, p[0]) / 2, 0, Math.PI * 2); c.fill(); c.restore(); return;
   }
   if (s.hl){
-    c.lineWidth = s.size; c.beginPath(); c.moveTo(p[0].x, p[0].y);
-    for (let i = 1; i < p.length - 1; i++){ const mx = (p[i].x + p[i+1].x) / 2, my = (p[i].y + p[i+1].y) / 2; c.quadraticCurveTo(p[i].x, p[i].y, mx, my); }
-    c.lineTo(p[p.length-1].x, p[p.length-1].y); c.stroke();
+    // 太い線で、書き終わりの細かい行ったり来たりをそのまま1本に描くと、iPadのSafariでは重なりが打ち消し合って
+    // 端に丸い穴が空く。線の太さの1/4より近い点は間引き、短い区切りごとに描く（不透明の板に描くので区切りは見えない）
+    const q = hlPts(s), CH = 12;
+    c.lineWidth = s.size;
+    for (let a = 0; a < q.length - 1; a += CH){
+      const b = Math.min(q.length - 1, a + CH);
+      c.beginPath(); c.moveTo(q[a].x, q[a].y);
+      for (let i = a + 1; i < b; i++){ const mx = (q[i].x + q[i+1].x) / 2, my = (q[i].y + q[i+1].y) / 2; c.quadraticCurveTo(q[i].x, q[i].y, mx, my); }
+      c.lineTo(q[b].x, q[b].y); c.stroke();
+    }
   } else {
     const q = strokeQ(s);
     drawQ(c, s, q, 0, q.length - 1);
   }
   c.restore();
+}
+// マーカー用：線の太さの1/4より近い点を間引いた点列（最後の点は残す）
+function hlPts(s){
+  const p = s.pts, step = Math.max(1, s.size * 0.25), q = [p[0]];
+  for (let i = 1; i < p.length; i++){ const L = q[q.length - 1]; if (Math.hypot(p[i].x - L.x, p[i].y - L.y) >= step) q.push(p[i]); }
+  const E = p[p.length - 1], L = q[q.length - 1];
+  if (q.length === 1 || Math.hypot(E.x - L.x, E.y - L.y) > 0.1){ if (q.length > 1 && Math.hypot(E.x - L.x, E.y - L.y) < step) q[q.length - 1] = E; else q.push(E); }
+  return q;
 }
 // 速く書いて点がまばらでも途切れないよう、点の間を曲線で補ってから滑らかにした点列
 function strokeQ(s, idx){ return smoothPts(smoothPts(catmull(s.pts, 2.5, idx))); }
@@ -433,20 +448,39 @@ function drawLiveTail(c, Q, rec){
 }
 function drawItem(c, it){
   if (it.type === 'image'){ const im = getImg(it.src); if (im.complete && im.naturalWidth) c.drawImage(im, it.x, it.y, it.w, it.h); }
+  else if (it.hl) drawHighlights(c, [it]);
   else drawStroke(c, it);
 }
 function renderItems(c, list){
   c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
   c.fillStyle = BOARD_BG(); c.fillRect(0, 0, W, H);
   if (grid) drawGrid(c);
-  const hidden = drag ? new Set(sel) : null;
-  for (const it of (list || page().items)){ if (!hidden || !hidden.has(it)) drawItem(c, it); }
+  const hidden = drag ? new Set(sel) : null, hls = [];
+  for (const it of (list || page().items)){
+    if (hidden && hidden.has(it)) continue;
+    if (it.type === 'stroke' && it.hl) hls.push(it); else drawItem(c, it);
+  }
+  if (hls.length) drawHighlights(c, hls);
+}
+// マーカーは、全部の線をいったん不透明で別の板に描いてから、最後に1回だけ半透明で重ねる。
+// こうすると、マーカー同士が重なったところ（線の端の丸など）が二重に濃くならない
+const hlBufs = new WeakMap();
+function drawHighlights(c, hls){
+  const cvs = c.canvas; let b = hlBufs.get(cvs);
+  if (!b || b.width !== cvs.width || b.height !== cvs.height){ b = document.createElement('canvas'); b.width = cvs.width; b.height = cvs.height; hlBufs.set(cvs, b); }
+  const g = b.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, b.width, b.height);
+  g.setTransform(c.getTransform());
+  for (const s of hls) drawStroke(g, s, true);
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+  if (dark){ c.globalAlpha = .5; c.globalCompositeOperation = 'screen'; } else { c.globalAlpha = .38; c.globalCompositeOperation = 'multiply'; }
+  c.drawImage(b, 0, 0); c.restore();
 }
 function renderLayer(){ renderItems(lctx); layerDirty = false; recDirty = true; if (drawing) liveOf(drawing).done = 0; }
 // 書いている途中の線・動かしている途中のもの・レーザーなど（display=true のときは画面専用の補助表示も）
 let curLiveQ = null;
 function drawOverlays(c, display){
-  if (drawing) drawLiveTail(c, curLiveQ, !display);
+  if (drawing){ if (drawing.hl) drawHighlights(c, [drawing]); else drawLiveTail(c, curLiveQ, !display); }
   if (tool === 'move'){
     const accent = dark ? '#7db3ff' : '#1f5fbf';
     if (drag){
@@ -536,6 +570,8 @@ function changed(){ layerDirty = needsRender = true; libDirty = true; updateUI()
 // 書き終えた1本を足すだけのとき：ページ全体を描き直さず、その1本だけを描き足す
 function strokeAdded(s){
   // 書いている途中にボードへ描き込み済みの部分は飛ばして、残りだけを描き足す
+  // マーカーは他のマーカーとの重なりをまとめて塗り直す必要があるので、ページを描き直す
+  if (s.hl){ layerDirty = true; recDirty = true; curLiveQ = null; needsRender = true; libDirty = true; updateUI(); scheduleSave(); return; }
   const L = live.get(s), Q = L && usesLive(s) ? strokeQ(s) : null, end = Q ? Q.length - 1 : 0;
   if (!layerDirty){ if (Q && L.done) drawQ(lctx, s, Q, L.done, end); else drawStroke(lctx, s); }
   if (recLctx && !recDirty){ if (Q && L.recDone) drawQ(recLctx, s, Q, L.recDone, end); else drawStroke(recLctx, s); }
